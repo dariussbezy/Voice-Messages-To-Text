@@ -21,7 +21,7 @@ const implementation = (() => {
   const { metro } = rainRuntime;
   const patcher = rainRuntime.api.patcher;
   const ui = rainRuntime.api.ui;
-  const { findByProps, findByStoreName } = metro;
+  const { findByName, findByProps, findByStoreName } = metro;
   const { React, ReactNative: RN, FluxDispatcher, clipboard } = metro.common;
   const common = metro.common || {};
   const stores = common.stores || {};
@@ -444,15 +444,15 @@ const implementation = (() => {
     const m = row && row.message;
     if (!m) return;
     const rowType = input && input.rowType !== undefined ? input.rowType : row.rowType;
-    if (rowType !== 1) return;
     const tr = cfg().inline === false ? null : transcripts.get(String(m.id));
+    if (rowType !== 1 && !tr) return;
     const ours = !!m.__vtOut && m.content === m.__vtOut;
     if (!tr) {
       if (ours) m.content = m.__vtBase;
       else if (Array.isArray(m.content)) { const clean = stripOurs(m.content); if (clean.length !== m.content.length) m.content = clean; }
       return;
     }
-    const base = ours ? m.__vtBase : Array.isArray(m.content) ? stripOurs(m.content) : (typeof m.content === "string" && !m.content.trim() ? [] : null);
+    const base = ours ? m.__vtBase : Array.isArray(m.content) ? stripOurs(m.content) : (m.content == null || (typeof m.content === "string" && !m.content.trim()) ? [] : null);
     if (!Array.isArray(base)) return;
     const pc = RN.processColor;
     const color = pc ? pc(ACCENT) : null;
@@ -472,9 +472,9 @@ const implementation = (() => {
     }
   }
   function patchRender() {
-    const RowManager = safe(() => metro.findByName("RowManager"), null);
+    const RowManager = safe(() => findByName("RowManager"), null);
     if (!RowManager || !RowManager.prototype || typeof RowManager.prototype.generate !== "function") return false;
-    renderUnpatch = patcher.after("generate", RowManager.prototype, (args, ret) => {
+    renderUnpatch = rainRuntime.api.patcher.after("generate", RowManager.prototype, (args, ret) => {
       try { decorate(ret, args[0]); } catch (_) { onRenderError(); }
     });
     return true;
