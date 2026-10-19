@@ -1,8 +1,8 @@
 {
   "id": "voicetotext",
   "name": "Voice Messages to Text",
-  "description": "Turns voice messages into text. Long-press a voice message and choose Transcribe voice message. Needs your own Groq or OpenAI API key (see the plugin settings).",
-  "version": "1.0.0",
+  "description": "Turns voice messages into text. Long-press a voice message and choose Transcribe voice message. Works with a free server (no API key) or your own Groq or OpenAI key (see the plugin settings).",
+  "version": "1.1.1",
   "authors": [
     "dariussbezy"
   ],

@@ -1,12 +1,17 @@
 const rainRuntime = globalThis.rain;
+// Free server (no API key for users): deploy worker.js on Cloudflare once, then put its address here.
+// DEFAULT_TOKEN must match the TOKEN variable of the worker (leave both empty for an open worker).
+const DEFAULT_SERVER = "";
+const DEFAULT_TOKEN = "";
 if (!rainRuntime || !rainRuntime.api || !rainRuntime.api.storage) throw new Error("Discord plugin API unavailable");
 const rainStore = rainRuntime.api.storage.createPluginStore("voicetotext", {
-  provider: "groq",
+  provider: DEFAULT_SERVER ? "server" : "groq",
   apiKey: "",
+  serverUrl: "",
   model: "whisper-large-v3-turbo",
   language: "auto",
   inline: true,
-  popup: true,
+  card: false,
   auto: "off",
   saveTranscripts: true,
   transcripts: [],
@@ -21,7 +26,7 @@ const implementation = (() => {
   const common = metro.common || {};
   const stores = common.stores || {};
 
-  const BUILD = "v1.0.0";
+  const BUILD = "v1.1.1";
   const SHEET_KEY = "voice-transcript";
   const FLAG_VOICE = 8192;
   const FLAG_TOGGLE = 0x04000000;
@@ -29,6 +34,7 @@ const implementation = (() => {
   const MAX_TRANSCRIPTS = 200;
   const TIMEOUT = 90000;
   const PROVIDERS = {
+    server: { name: "Free server", base: "", byUrl: true, server: true, models: [["whisper-large-v3-turbo", "Whisper large v3 turbo"]] },
     groq: { name: "Groq", base: "https://api.groq.com/openai/v1", byUrl: true,
       models: [["whisper-large-v3-turbo", "Whisper large v3 turbo (fast)"], ["whisper-large-v3", "Whisper large v3 (accurate)"]] },
     openai: { name: "OpenAI", base: "https://api.openai.com/v1", byUrl: false,
@@ -58,6 +64,8 @@ const implementation = (() => {
   const toast = (t) => { try { ui.toasts.showToast(t); } catch (_) {} };
   const safe = (fn, fallback) => { try { return fn(); } catch (_) { return fallback; } };
   const provider = () => PROVIDERS[cfg().provider] || PROVIDERS.groq;
+  const serverEndpoint = () => String(cfg().serverUrl || "").trim() || DEFAULT_SERVER;
+  const configured = () => (provider().server ? !!serverEndpoint() : !!String(cfg().apiKey || "").trim());
   const nameOf = (list, code) => { const hit = list.find((x) => x[0] === code); return hit ? hit[1] : String(code); };
   const MessageStore = () => stores.MessageStore || safe(() => findByStoreName("MessageStore"), null);
   const ChannelStore = () => stores.ChannelStore || safe(() => findByStoreName("ChannelStore"), null);
@@ -308,9 +316,9 @@ const implementation = (() => {
   const errText = (e) => (e && e.name === "AbortError") ? "The request timed out" : (e && e.message ? e.message : "unknown error");
   async function explain(res) {
     let detail = "";
-    try { const j = await res.json(); detail = (j && j.error && j.error.message) || ""; } catch (_) {}
+    try { const j = await res.json(); detail = (j && j.error && (typeof j.error === "string" ? j.error : j.error.message)) || ""; } catch (_) {}
     const s = res.status;
-    if (s === 401 || s === 403) return "The API key was rejected";
+    if (s === 401 || s === 403) return provider().server ? "The server rejected the request (check the token)" : "The API key was rejected";
     if (s === 413) return "This voice message is too large for the service";
     if (s === 429) return "Rate limit reached, try again in a moment";
     if (s >= 500) return "The service is unavailable right now";
@@ -318,10 +326,23 @@ const implementation = (() => {
   }
   async function callService(att) {
     const p = provider(), s = cfg();
-    const key = String(s.apiKey || "").trim();
-    if (!key) throw new Error("Add your API key in the plugin settings first");
     const url = attUrl(att);
     if (!url) throw new Error("This message has no audio file");
+    if (p.server) {
+      const endpoint = serverEndpoint();
+      if (!endpoint) throw new Error("Set the server address in the plugin settings first");
+      const payload = { url, language: s.language && s.language !== "auto" ? s.language : undefined };
+      const headers = { "Content-Type": "application/json" };
+      if (DEFAULT_TOKEN) headers["x-token"] = DEFAULT_TOKEN;
+      const r = await fetchT(endpoint, { method: "POST", headers, body: JSON.stringify(payload) });
+      if (!r.ok) throw new Error(await explain(r));
+      const d = await r.json();
+      const t = String(d && d.text != null ? d.text : "").trim();
+      if (!t) throw new Error("No speech was found in this voice message");
+      return t;
+    }
+    const key = String(s.apiKey || "").trim();
+    if (!key) throw new Error("Add your API key in the plugin settings first");
     const model = p.models.some((x) => x[0] === s.model) ? s.model : p.models[0][0];
     const form = new FormData();
     form.append("model", model);
@@ -344,9 +365,10 @@ const implementation = (() => {
   }
   async function testConnection() {
     const key = String(cfg().apiKey || "").trim();
-    if (!key) { toast("Paste your API key first"); return; }
+    const srv = provider().server;
+    if (srv ? !serverEndpoint() : !key) { toast(srv ? "Set the server address first" : "Paste your API key first"); return; }
     try {
-      const res = await fetchT(provider().base + "/models", { headers: { Authorization: "Bearer " + key } });
+      const res = srv ? await fetchT(serverEndpoint()) : await fetchT(provider().base + "/models", { headers: { Authorization: "Bearer " + key } });
       toast(res.ok ? "Connection works" : await explain(res));
     } catch (e) { toast(errText(e)); }
   }
@@ -386,11 +408,11 @@ const implementation = (() => {
       persist();
       refreshRow(channelId, id);
       if (!o.auto) {
-        if (cfg().popup !== false) { if (!openResult(id)) toast(text.slice(0, 120)); }
-        else if (cfg().inline === false) toast(text.slice(0, 120));
+        const inlineWorks = cfg().inline !== false && !!renderUnpatch;
+        if (cfg().card === true || !inlineWorks) { if (!openResult(id)) toast(text.slice(0, 120)); }
       }
     } catch (e) {
-      if (!o.auto || cfg().apiKey) toast("Transcription failed: " + errText(e));
+      if (!o.auto || configured()) toast("Transcription failed: " + errText(e));
     } finally { busy.delete(id); }
   }
   function removeTranscript(id) {
@@ -519,7 +541,7 @@ const implementation = (() => {
       const m = ev && ev.message;
       if (!m || ev.optimistic) return;
       const mode = cfg().auto;
-      if (!mode || mode === "off" || !cfg().apiKey) return;
+      if (!mode || mode === "off" || !configured()) return;
       if (!voiceAttachment(m)) return;
       if (m.author && String(m.author.id) === myId()) return;
       if (mode === "dms" && !isDM(getChannel(m.channel_id || ev.channelId))) return;
@@ -589,6 +611,18 @@ const implementation = (() => {
       h(CustomInput, { value, placeholder: "Paste your API key", secureTextEntry: !shown, autoCapitalize: "none", autoCorrect: false, spellCheck: false,
         onChangeText: (v) => { setValue(v); setSetting("apiKey", v.trim()); p.onChange && p.onChange(); } }));
   }
+  function UrlField() {
+    const C = palette(), h = React.createElement;
+    const [value, setValue] = React.useState(String(cfg().serverUrl || ""));
+    return h(RN.View, { style: { paddingHorizontal: 16, paddingVertical: 12, borderTopWidth: 1, borderTopColor: C.card2 } },
+      h(RN.View, { style: { flexDirection: "row", alignItems: "center", marginBottom: 10 } },
+        KitTile({ k: "server", size: 34 }),
+        h(RN.View, { style: { flex: 1 } },
+          h(RN.Text, { style: { color: C.text, fontSize: 16, fontWeight: "600" } }, "Server address"),
+          h(RN.Text, { style: { color: C.sub, fontSize: 13, marginTop: 2 } }, DEFAULT_SERVER ? "Leave empty to use the built-in server." : "The address of your transcription server."))),
+      h(CustomInput, { value, placeholder: DEFAULT_SERVER || "https://your-server.workers.dev", autoCapitalize: "none", autoCorrect: false, spellCheck: false, keyboardType: "url",
+        onChangeText: (v) => { setValue(v); setSetting("serverUrl", v.trim()); } }));
+  }
   function Settings() {
     rainStore.useStore();
     const [, bump] = React.useState(0);
@@ -599,24 +633,24 @@ const implementation = (() => {
       trailing: h(CustomSwitch, { value: s[key] !== false && !!s[key], onChange: (v) => { setSetting(key, v); redraw(); if (after) after(v); } }) });
     const model = p.models.some((x) => x[0] === s.model) ? s.model : p.models[0][0];
     const guide = h(KitGuide, { key: "guide", title: "Quick guide", steps: [
-      ["Get a key", "Create an API key at console.groq.com (it has a free tier) or use an OpenAI key. Paste it above and tap Test connection."],
-      ["Transcribe a message", "Long-press any voice message and choose Transcribe voice message. The text appears under the message and in a card with a Copy button."],
+      ["Choose a service", "Free server needs no key: it only needs the server address (see the setup note). Or use your own key from console.groq.com (free tier) or OpenAI, then tap Test connection."],
+      ["Transcribe a message", "Long-press any voice message and choose Transcribe voice message. The text appears right under the voice message. Long-press it again to copy it."],
       ["Language", "Auto-detect works for most voice messages. Pick a language if short messages are misread."],
       ["Automatic mode", "Transcribes new incoming voice messages by itself, in direct messages or in every chat. Each one is a request to your service, so it uses your quota."],
       ["Privacy", "The link to the audio is sent to the service you chose when a message is transcribed. Nothing goes anywhere else."],
     ] });
     return h(RN.ScrollView, { style: { flex: 1 }, keyboardShouldPersistTaps: "handled", contentContainerStyle: { padding: 16, paddingBottom: 42 } },
       h(KitHero, { key: "hero", icon: "mic", title: "Voice Messages to Text", subtitle: "Read voice messages as text", stats: [["Transcribed", transcripts.size], ["Service", p.name]] }),
-      h(CustomSection, { key: "service", title: "Service", footer: "Audio is sent to the selected service only when a message is transcribed." },
+      h(CustomSection, { key: "service", title: "Service", footer: p.server ? "No API key needed. The link to the audio is sent to the server only when a message is transcribed." : "Audio is sent to the selected service only when a message is transcribed." },
         h(SelectRow, { key: "provider", title: "Service", icon: "server", value: p.name, onPress: () => pick("Service", "VTProvider", Object.keys(PROVIDERS).map((k) => [k, PROVIDERS[k].name]), s.provider,
           (v) => { setSetting("provider", v); setSetting("model", PROVIDERS[v].models[0][0]); redraw(); }) }),
-        h(SelectRow, { key: "model", title: "Model", icon: "power", value: nameOf(p.models, model).split(" (")[0], onPress: () => pick("Model", "VTModel", p.models, model, (v) => { setSetting("model", v); redraw(); }) }),
+        p.server ? null : h(SelectRow, { key: "model", title: "Model", icon: "power", value: nameOf(p.models, model).split(" (")[0], onPress: () => pick("Model", "VTModel", p.models, model, (v) => { setSetting("model", v); redraw(); }) }),
         h(SelectRow, { key: "language", title: "Language", icon: "lang", value: nameOf(LANGS, s.language), last: false, onPress: () => pick("Language", "VTLanguage", LANGS, s.language, (v) => { setSetting("language", v); redraw(); }) }),
-        h(KeyField, { key: "key" + s.provider }),
+        p.server ? h(UrlField, { key: "url" }) : h(KeyField, { key: "key" + s.provider }),
         h(CustomAction, { key: "test", title: "Test connection", secondary: true, compact: true, onPress: testConnection })),
       h(CustomSection, { key: "display", title: "Display" },
         toggle("inline", "Show under message", "Show the text right under the voice message.", "text"),
-        toggle("popup", "Show result card", "Open a card with the text and a Copy button when it is ready.", "guide", true)),
+        toggle("card", "Also open a result card", "Open a card with a Copy button when the text is ready.", "guide", true)),
       h(CustomSection, { key: "auto", title: "Automatic" },
         h(SelectRow, { key: "auto", title: "Auto-transcribe", subtitle: "Transcribe new incoming voice messages by themselves.", icon: "bell", value: nameOf(AUTO_MODES, s.auto || "off").replace(" only", ""), last: true,
           onPress: () => pick("Auto-transcribe", "VTAuto", AUTO_MODES, s.auto || "off", (v) => { setSetting("auto", v); redraw(); }) })),
@@ -633,7 +667,7 @@ const implementation = (() => {
     if (!loadRequested || initialized) return;
     initialized = true;
     const s = cfg();
-    const defaults = { provider: "groq", model: "whisper-large-v3-turbo", language: "auto", inline: true, popup: true, auto: "off", saveTranscripts: true };
+    const defaults = { provider: DEFAULT_SERVER ? "server" : "groq", serverUrl: "", model: "whisper-large-v3-turbo", language: "auto", inline: true, card: false, auto: "off", saveTranscripts: true };
     const missing = {};
     for (const k of Object.keys(defaults)) if (s[k] === undefined) missing[k] = defaults[k];
     if (Object.keys(missing).length) rainStore.useStore.getState().updateSettings(missing);
