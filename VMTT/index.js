@@ -26,7 +26,7 @@ const implementation = (() => {
   const common = metro.common || {};
   const stores = common.stores || {};
 
-  const BUILD = "v1.1.5";
+  const BUILD = "v1.1.6";
   const SHEET_KEY = "voice-transcript";
   const FLAG_VOICE = 8192;
   const FLAG_TOGGLE = 0x04000000;
@@ -452,8 +452,8 @@ const implementation = (() => {
       const pc = RN.processColor;
       const color = pc ? pc(ACCENT) : null;
       const txt = String(found.text);
-      // plain blue text (same look as normal message text), no colored bar
-      m.embeds = cleanEmbeds.concat([{ id: "vt-" + m.id, type: "rich", __vt: true, rawDescription: txt, description: paint([{ type: "text", content: txt }], color), fields: [] }]);
+      // native side decodes embeds strictly: description must be a plain string and "spoiler" must exist
+      m.embeds = cleanEmbeds.concat([{ id: "vt-" + m.id, type: "rich", __vt: true, spoiler: false, rawDescription: txt, description: txt, color: color == null ? undefined : color, fields: [] }]);
     } else if (cleanEmbeds.length !== embeds.length) m.embeds = cleanEmbeds;
     // clean up text that older versions put above the voice message
     const ours = !!m.__vtOut && m.content === m.__vtOut;

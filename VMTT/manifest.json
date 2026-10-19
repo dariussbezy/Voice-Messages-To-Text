@@ -2,7 +2,7 @@
   "id": "voicetotext",
   "name": "Voice Messages To Text",
   "description": "Read voice messages as text. Long-press a voice message and choose Transcribe. Check the plugin settings!",
-  "version": "1.1.5",
+  "version": "1.1.6",
   "authors": [
     "dariussbezy"
   ],
