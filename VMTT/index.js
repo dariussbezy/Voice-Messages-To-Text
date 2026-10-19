@@ -26,7 +26,7 @@ const implementation = (() => {
   const common = metro.common || {};
   const stores = common.stores || {};
 
-  const BUILD = "v1.1.10";
+  const BUILD = "v1.1.11";
   const SHEET_KEY = "voice-transcript";
   const FLAG_VOICE = 8192;
   const FLAG_TOGGLE = 0x04000000;
@@ -460,7 +460,7 @@ const implementation = (() => {
     if (!tr) return;
     // the text goes in an embed: Discord draws embeds after the attachments, so it shows below the voice message
     const colorNum = parseInt(ACCENT.slice(1), 16);
-    const embed = { id: "vt-" + m.id, type: "rich", rawDescription: tr.text, description: [{ type: "text", content: tr.text }], fields: [], color: isNaN(colorNum) ? undefined : colorNum, __vt: true };
+    const embed = { id: "vt-" + m.id, type: "rich", rawDescription: tr.text, description: tr.text, color: isNaN(colorNum) ? undefined : colorNum, __vt: true };
     m.embeds = cleanEmbeds.concat([embed]);
   }
   function onRenderError() {
