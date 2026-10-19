@@ -395,11 +395,7 @@ const implementation = (() => {
     const id = message && message.id ? String(message.id) : "";
     const att = voiceAttachment(message);
     if (!id || !att) { if (!o.auto) toast("This is not a voice message"); return; }
-    if (transcripts.has(id)) {
-      if (!o.auto && cfg().card === true) openResult(id);
-      else if (!o.auto) toast("Transcript already saved. Open the message menu to view it.");
-      return;
-    }
+    if (transcripts.has(id)) { if (!o.auto) openResult(id); return; }
     if (busy.has(id)) { if (!o.auto) toast("Already transcribing this message"); return; }
     busy.add(id);
     if (!o.auto) toast("Transcribing…");
@@ -411,8 +407,7 @@ const implementation = (() => {
       refreshRow(channelId, id);
       if (!o.auto) {
         const inlineWorks = cfg().inline !== false && !!renderUnpatch;
-        if (cfg().card === true) openResult(id);
-        else if (!inlineWorks) toast("Transcript saved. Open the message menu to view it.");
+        if (cfg().card === true || !inlineWorks) { if (!openResult(id)) toast(text.slice(0, 120)); }
       }
     } catch (e) {
       if (!o.auto || configured()) toast("Transcription failed: " + errText(e));
@@ -428,57 +423,59 @@ const implementation = (() => {
     try { clipboard.setString(text); toast("Copied"); } catch (_) { toast("Could not copy"); }
   }
 
-  /* ---- transcript below the rendered voice player ---- */
-  function findTranscriptInProps(root) {
-    const seen = new Set();
-    const visit = (value, depth) => {
-      if (!value || typeof value !== "object" || depth > 4 || seen.has(value)) return null;
-      seen.add(value);
-      for (const key of ["id", "messageId", "message_id"]) {
-        const id = value[key];
-        if (id != null) {
-          const transcript = transcripts.get(String(id));
-          if (transcript) return { message: value, transcript };
-        }
-      }
-      for (const key of ["message", "messageRecord", "messageData", "attachment", "item", "data", "props"]) {
-        const hit = visit(value[key], depth + 1);
-        if (hit) return hit;
-      }
-      return null;
-    };
-    return visit(root, 0);
+  /* ---- inline text below the voice message ---- */
+  function paint(nodes, color) {
+    if (!color) return nodes;
+    return [{ type: "link", target: "usernameOnClick", context: { username: "", usernameOnClick: { action: "0", userId: "0", linkColor: color, messageChannelId: "0" } }, content: nodes }];
   }
-  function transcriptAfterPlayer(hit) {
-    const mine = !!(hit.message && hit.message.author && String(hit.message.author.id) === myId());
-    return React.createElement(RN.View, {
-      key: "vt-transcript-" + String(hit.transcript.id),
-      style: { marginTop: 6, maxWidth: "100%", alignSelf: mine ? "flex-end" : "flex-start", backgroundColor: "transparent" },
-    }, React.createElement(RN.Text, {
-      selectable: true,
-      style: { color: ACCENT, fontSize: 16, lineHeight: 22 },
-    }, hit.transcript.text));
+  function stripOurs(nodes) {
+    const out = [];
+    for (const n of nodes) {
+      if (n && n.__vt) continue;
+      if (n && Array.isArray(n.content)) {
+        const inner = stripOurs(n.content);
+        if (!inner.length && n.content.length) continue;
+        out.push(inner.length === n.content.length ? n : Object.assign({}, n, { content: inner }));
+      } else out.push(n);
+    }
+    return out;
+  }
+  function decorate(row, input) {
+    const m = row && row.message;
+    if (!m) return;
+    const rowType = input && input.rowType !== undefined ? input.rowType : row.rowType;
+    const found = cfg().inline === false ? null : transcripts.get(String(m.id));
+    if (rowType !== 1 && !found) return;
+    const tr = found;
+    // remove any embed added by older versions
+    const embeds = Array.isArray(m.embeds) ? m.embeds : [];
+    const cleanEmbeds = embeds.filter((e) => !(e && e.__vt));
+    if (cleanEmbeds.length !== embeds.length) m.embeds = cleanEmbeds;
+    // older versions put the text in the message content (above the player): restore it
+    const ours = !!m.__vtOut && m.content === m.__vtOut;
+    if (ours) { m.content = m.__vtBase; }
+    else if (Array.isArray(m.content)) { const clean = stripOurs(m.content); if (clean.length !== m.content.length) m.content = clean; }
+    delete m.__vtOut;
+    delete m.__vtBase;
+    if (!tr) return;
+    // the text goes in an embed: Discord draws embeds after the attachments, so it shows below the voice message
+    const colorNum = parseInt(ACCENT.slice(1), 16);
+    const embed = { id: "vt-" + m.id, type: "rich", rawDescription: tr.text, color: isNaN(colorNum) ? undefined : colorNum, __vt: true };
+    m.embeds = cleanEmbeds.concat([embed]);
   }
   function onRenderError() {
     renderErrors++;
     if (renderErrors >= 3 && renderUnpatch) {
       try { renderUnpatch(); } catch (_) {}
       renderUnpatch = null;
-      toast("Voice Messages to Text: transcripts below voice messages were turned off after repeated errors");
+      toast("Voice Messages to Text: text below voice messages was turned off after repeated errors");
     }
   }
   function patchRender() {
-    let VoiceMessageChat = safe(() => findByName("VoiceMessageChat"), null);
-    if (!VoiceMessageChat) VoiceMessageChat = safe(() => findByName("VoiceMessageChat", false), null);
-    const target = VoiceMessageChat && (VoiceMessageChat.default || VoiceMessageChat);
-    if (!target) return false;
-    renderUnpatch = rainRuntime.api.patcher.after("type", target, (args, ret) => {
-      try {
-        if (cfg().inline === false) return ret;
-        const hit = findTranscriptInProps(args && args[0]);
-        if (!hit) return ret;
-        return React.createElement(React.Fragment, null, ret, transcriptAfterPlayer(hit));
-      } catch (_) { onRenderError(); return ret; }
+    const RowManager = safe(() => findByName("RowManager"), null);
+    if (!RowManager || !RowManager.prototype || typeof RowManager.prototype.generate !== "function") return false;
+    renderUnpatch = rainRuntime.api.patcher.after("generate", RowManager.prototype, (args, ret) => {
+      try { decorate(ret, args[0]); } catch (_) { onRenderError(); }
     });
     return true;
   }
@@ -635,7 +632,7 @@ const implementation = (() => {
     const model = p.models.some((x) => x[0] === s.model) ? s.model : p.models[0][0];
     const guide = h(KitGuide, { key: "guide", title: "Quick guide", steps: [
       ["Choose a service", "Free server (no key) works right away, nothing to paste. Or pick Groq (also free) and paste your own API key: open console.groq.com/keys, sign in, tap Create API Key, copy it here, then tap Test connection."],
-      ["Transcribe a message", "Long-press any voice message and choose Transcribe voice message. The text appears below the voice player. Long-press it again to copy it."],
+      ["Transcribe a message", "Long-press any voice message and choose Transcribe voice message. The text appears right below the voice message. Long-press it again to copy it."],
       ["Language", "Auto-detect works for most voice messages. Pick a language if short messages are misread."],
       ["Automatic mode", "Transcribes new incoming voice messages by itself, in direct messages or in every chat. Each one is a request to your service, so it uses your quota."],
       ["Privacy", "The link to the audio is sent to the service you chose when a message is transcribed. Nothing goes anywhere else."],
@@ -650,7 +647,7 @@ const implementation = (() => {
         p.server ? (DEFAULT_SERVER ? null : h(UrlField, { key: "url" })) : h(KeyField, { key: "key" + s.provider }),
         h(CustomAction, { key: "test", title: "Test connection", secondary: true, compact: true, onPress: testConnection })),
       h(CustomSection, { key: "display", title: "Display" },
-        toggle("inline", "Show text below voice message", "Show the transcript beneath the audio player.", "text"),
+        toggle("inline", "Show text below message", "Show the text right below the voice message.", "text"),
         toggle("card", "Also open a result card", "Open a card with a Copy button when the text is ready.", "guide", true)),
       h(CustomSection, { key: "auto", title: "Automatic" },
         h(SelectRow, { key: "auto", title: "Auto-transcribe", subtitle: "Transcribe new incoming voice messages by themselves.", icon: "bell", value: nameOf(AUTO_MODES, s.auto || "off").replace(" only", ""), last: true,
@@ -673,7 +670,7 @@ const implementation = (() => {
     for (const k of Object.keys(defaults)) if (s[k] === undefined) missing[k] = defaults[k];
     if (Object.keys(missing).length) rainStore.useStore.getState().updateSettings(missing);
     loadSaved();
-    if (!patchRender()) toast("Voice Messages to Text: inline transcripts are unavailable; open saved text from the message menu");
+    if (!patchRender()) toast("Voice Messages to Text: could not find the message list, text below voice messages is unavailable");
     if (!patchActionSheet()) toast("Voice Messages to Text: could not add the menu entry");
     try { FluxDispatcher.subscribe("MESSAGE_CREATE", onCreate); unpatches.push(() => FluxDispatcher.unsubscribe("MESSAGE_CREATE", onCreate)); } catch (_) {}
   }
