@@ -26,7 +26,7 @@ const implementation = (() => {
   const common = metro.common || {};
   const stores = common.stores || {};
 
-  const BUILD = "v1.1.4";
+  const BUILD = "v1.1.5";
   const SHEET_KEY = "voice-transcript";
   const FLAG_VOICE = 8192;
   const FLAG_TOGGLE = 0x04000000;
@@ -423,7 +423,7 @@ const implementation = (() => {
     try { clipboard.setString(text); toast("Copied"); } catch (_) { toast("Could not copy"); }
   }
 
-  /* ---- inline text above the voice message ---- */
+  /* ---- inline text under the voice message ---- */
   function paint(nodes, color) {
     if (!color) return nodes;
     return [{ type: "link", target: "usernameOnClick", context: { username: "", usernameOnClick: { action: "0", userId: "0", linkColor: color, messageChannelId: "0" } }, content: nodes }];
@@ -446,33 +446,26 @@ const implementation = (() => {
     const rowType = input && input.rowType !== undefined ? input.rowType : row.rowType;
     const found = cfg().inline === false ? null : transcripts.get(String(m.id));
     if (rowType !== 1 && !found) return;
-    const tr = found;
     const embeds = Array.isArray(m.embeds) ? m.embeds : [];
     const cleanEmbeds = embeds.filter((e) => !(e && e.__vt));
-    if (cleanEmbeds.length !== embeds.length) m.embeds = cleanEmbeds;
+    if (found) {
+      const pc = RN.processColor;
+      const color = pc ? pc(ACCENT) : null;
+      const txt = String(found.text);
+      // plain blue text (same look as normal message text), no colored bar
+      m.embeds = cleanEmbeds.concat([{ id: "vt-" + m.id, type: "rich", __vt: true, rawDescription: txt, description: paint([{ type: "text", content: txt }], color), fields: [] }]);
+    } else if (cleanEmbeds.length !== embeds.length) m.embeds = cleanEmbeds;
+    // clean up text that older versions put above the voice message
     const ours = !!m.__vtOut && m.content === m.__vtOut;
-    if (!tr) {
-      if (ours) m.content = m.__vtBase;
-      else if (Array.isArray(m.content)) { const clean = stripOurs(m.content); if (clean.length !== m.content.length) m.content = clean; }
-      return;
-    }
-    const base = ours ? m.__vtBase : Array.isArray(m.content) ? stripOurs(m.content) : (m.content == null || (typeof m.content === "string" && !m.content.trim()) ? [] : null);
-    if (!Array.isArray(base)) return;
-    const pc = RN.processColor;
-    const color = pc ? pc(ACCENT) : null;
-    const text = [{ type: "text", content: tr.text, __vt: true }];
-    const gap = () => ({ type: "text", content: "\n", __vt: true });
-    const out = base.length ? base.concat([gap(), gap()], paint(text, color)) : paint(text, color);
-    m.__vtBase = base;
-    m.__vtOut = out;
-    m.content = out;
+    if (ours) m.content = m.__vtBase;
+    else if (Array.isArray(m.content)) { const clean = stripOurs(m.content); if (clean.length !== m.content.length) m.content = clean; }
   }
   function onRenderError() {
     renderErrors++;
     if (renderErrors >= 3 && renderUnpatch) {
       try { renderUnpatch(); } catch (_) {}
       renderUnpatch = null;
-      toast("Voice Messages to Text: text above voice messages was turned off after repeated errors");
+      toast("Voice Messages to Text: text under voice messages was turned off after repeated errors");
     }
   }
   function patchRender() {
@@ -636,7 +629,7 @@ const implementation = (() => {
     const model = p.models.some((x) => x[0] === s.model) ? s.model : p.models[0][0];
     const guide = h(KitGuide, { key: "guide", title: "Quick guide", steps: [
       ["Choose a service", "Free server (no key) works right away, nothing to paste. Or pick Groq (also free) and paste your own API key: open console.groq.com/keys, sign in, tap Create API Key, copy it here, then tap Test connection."],
-      ["Transcribe a message", "Long-press any voice message and choose Transcribe voice message. The text appears right above the voice message. Long-press it again to copy it."],
+      ["Transcribe a message", "Long-press any voice message and choose Transcribe voice message. The text appears right under the voice message. Long-press it again to copy it."],
       ["Language", "Auto-detect works for most voice messages. Pick a language if short messages are misread."],
       ["Automatic mode", "Transcribes new incoming voice messages by itself, in direct messages or in every chat. Each one is a request to your service, so it uses your quota."],
       ["Privacy", "The link to the audio is sent to the service you chose when a message is transcribed. Nothing goes anywhere else."],
@@ -651,7 +644,7 @@ const implementation = (() => {
         p.server ? (DEFAULT_SERVER ? null : h(UrlField, { key: "url" })) : h(KeyField, { key: "key" + s.provider }),
         h(CustomAction, { key: "test", title: "Test connection", secondary: true, compact: true, onPress: testConnection })),
       h(CustomSection, { key: "display", title: "Display" },
-        toggle("inline", "Show text above message", "Show the text right above the voice message.", "text"),
+        toggle("inline", "Show text under message", "Show the text right under the voice message.", "text"),
         toggle("card", "Also open a result card", "Open a card with a Copy button when the text is ready.", "guide", true)),
       h(CustomSection, { key: "auto", title: "Automatic" },
         h(SelectRow, { key: "auto", title: "Auto-transcribe", subtitle: "Transcribe new incoming voice messages by themselves.", icon: "bell", value: nameOf(AUTO_MODES, s.auto || "off").replace(" only", ""), last: true,
@@ -674,7 +667,7 @@ const implementation = (() => {
     for (const k of Object.keys(defaults)) if (s[k] === undefined) missing[k] = defaults[k];
     if (Object.keys(missing).length) rainStore.useStore.getState().updateSettings(missing);
     loadSaved();
-    if (!patchRender()) toast("Voice Messages to Text: could not find the message list, text above voice messages is unavailable");
+    if (!patchRender()) toast("Voice Messages to Text: could not find the message list, text under voice messages is unavailable");
     if (!patchActionSheet()) toast("Voice Messages to Text: could not add the menu entry");
     try { FluxDispatcher.subscribe("MESSAGE_CREATE", onCreate); unpatches.push(() => FluxDispatcher.unsubscribe("MESSAGE_CREATE", onCreate)); } catch (_) {}
   }
