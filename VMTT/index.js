@@ -31,7 +31,6 @@ const implementation = (() => {
   const FLAG_VOICE = 8192;
   const FLAG_TOGGLE = 0x04000000;
   const ACCENT = "#8EA1FF";
-  const INLINE = new Set(["text", "strong", "em", "u", "s", "inlineCode", "customEmoji"]);
   const MAX_TRANSCRIPTS = 200;
   const TIMEOUT = 90000;
   const PROVIDERS = {
@@ -424,16 +423,7 @@ const implementation = (() => {
     try { clipboard.setString(text); toast("Copied"); } catch (_) { toast("Could not copy"); }
   }
 
-  /* ---- inline text above the voice message ---- */
-  function paint(nodes, color) {
-    if (!color) return nodes;
-    // Match Quick Translate: Discord's message parser expects only inline AST
-    // nodes inside the colored link. Passing other node types can make voice
-    // message transcripts render in the dark native transcript pill.
-    const inlineNodes = nodes.filter((node) => node && INLINE.has(node.type));
-    if (!inlineNodes.length) return [];
-    return [{ type: "link", target: "usernameOnClick", context: { username: "", usernameOnClick: { action: "0", userId: "0", linkColor: color, messageChannelId: "0" } }, content: inlineNodes }];
-  }
+  /* ---- transcript displayed below the voice player ---- */
   function stripOurs(nodes) {
     const out = [];
     for (const n of nodes) {
@@ -448,48 +438,52 @@ const implementation = (() => {
   }
   function decorate(row, input) {
     const m = row && row.message;
-    if (!m) return;
+    if (!m) return row;
     const rowType = input && input.rowType !== undefined ? input.rowType : row.rowType;
     const found = cfg().inline === false ? null : transcripts.get(String(m.id));
-    if (rowType !== 1 && !found) return;
-    const tr = found;
-    // remove any embed added by older versions
-    const embeds = Array.isArray(m.embeds) ? m.embeds : [];
-    const cleanEmbeds = embeds.filter((e) => !(e && e.__vt));
-    if (cleanEmbeds.length !== embeds.length) m.embeds = cleanEmbeds;
+    if (rowType !== 1 && !found) return row;
+    // Restore content mutated by older versions before adding the React sibling.
     const ours = !!m.__vtOut && m.content === m.__vtOut;
-    if (!tr) {
-      if (ours) m.content = m.__vtBase;
-      else if (Array.isArray(m.content)) { const clean = stripOurs(m.content); if (clean.length !== m.content.length) m.content = clean; }
-      return;
+    if (ours) m.content = m.__vtBase;
+    else if (Array.isArray(m.content)) {
+      const clean = stripOurs(m.content);
+      if (clean.length !== m.content.length) m.content = clean;
     }
-    const base = ours ? m.__vtBase : Array.isArray(m.content) ? stripOurs(m.content) : (m.content == null || (typeof m.content === "string" && !m.content.trim()) ? [] : null);
-    if (!Array.isArray(base)) return;
-    const pc = RN.processColor;
-    const color = pc ? pc(ACCENT) : null;
-    const text = [{ type: "text", content: tr.text, __vt: true }];
-    const gap = () => ({ type: "text", content: "\n", __vt: true });
-    const translated = paint(text, color);
-    // Keep the transcript in the same message AST, after the audio row's
-    // original content, just like Quick Translate's immersive mode.
-    const out = base.length ? base.concat([gap(), gap()], translated) : translated;
-    m.__vtBase = base;
-    m.__vtOut = out;
-    m.content = out;
+    if (!found) return row;
+
+    const mine = !!(m.author && String(m.author.id) === myId());
+    const transcript = React.createElement(RN.View, {
+      key: "vt-transcript-" + String(m.id),
+      style: {
+        marginTop: 5,
+        marginLeft: mine ? 16 : 68,
+        marginRight: mine ? 16 : 18,
+        alignItems: mine ? "flex-end" : "flex-start",
+        backgroundColor: "transparent",
+      },
+    }, React.createElement(RN.Text, {
+      selectable: true,
+      style: { color: ACCENT, fontSize: 16, lineHeight: 22 },
+    }, found.text));
+
+    // RowManager.generate returns the whole message row. A Fragment sibling
+    // places this native text block after the row, so it follows the audio
+    // player instead of being reordered into Discord's message-content slot.
+    return React.createElement(React.Fragment, { key: row.key || ("vt-row-" + String(m.id)) }, row, transcript);
   }
   function onRenderError() {
     renderErrors++;
     if (renderErrors >= 3 && renderUnpatch) {
       try { renderUnpatch(); } catch (_) {}
       renderUnpatch = null;
-      toast("Voice Messages to Text: text above voice messages was turned off after repeated errors");
+      toast("Voice Messages to Text: inline transcripts were turned off after repeated errors");
     }
   }
   function patchRender() {
     const RowManager = safe(() => findByName("RowManager"), null);
     if (!RowManager || !RowManager.prototype || typeof RowManager.prototype.generate !== "function") return false;
     renderUnpatch = rainRuntime.api.patcher.after("generate", RowManager.prototype, (args, ret) => {
-      try { decorate(ret, args[0]); } catch (_) { onRenderError(); }
+      try { return decorate(ret, args[0]); } catch (_) { onRenderError(); return ret; }
     });
     return true;
   }
@@ -646,7 +640,7 @@ const implementation = (() => {
     const model = p.models.some((x) => x[0] === s.model) ? s.model : p.models[0][0];
     const guide = h(KitGuide, { key: "guide", title: "Quick guide", steps: [
       ["Choose a service", "Free server (no key) works right away, nothing to paste. Or pick Groq (also free) and paste your own API key: open console.groq.com/keys, sign in, tap Create API Key, copy it here, then tap Test connection."],
-      ["Transcribe a message", "Long-press any voice message and choose Transcribe voice message. The text appears right above the voice message. Long-press it again to copy it."],
+      ["Transcribe a message", "Long-press any voice message and choose Transcribe voice message. The text appears below the voice player. Long-press it again to copy it."],
       ["Language", "Auto-detect works for most voice messages. Pick a language if short messages are misread."],
       ["Automatic mode", "Transcribes new incoming voice messages by itself, in direct messages or in every chat. Each one is a request to your service, so it uses your quota."],
       ["Privacy", "The link to the audio is sent to the service you chose when a message is transcribed. Nothing goes anywhere else."],
@@ -661,7 +655,7 @@ const implementation = (() => {
         p.server ? (DEFAULT_SERVER ? null : h(UrlField, { key: "url" })) : h(KeyField, { key: "key" + s.provider }),
         h(CustomAction, { key: "test", title: "Test connection", secondary: true, compact: true, onPress: testConnection })),
       h(CustomSection, { key: "display", title: "Display" },
-        toggle("inline", "Show text above message", "Show the text right above the voice message.", "text"),
+        toggle("inline", "Show text below voice message", "Show the transcript beneath the audio player.", "text"),
         toggle("card", "Also open a result card", "Open a card with a Copy button when the text is ready.", "guide", true)),
       h(CustomSection, { key: "auto", title: "Automatic" },
         h(SelectRow, { key: "auto", title: "Auto-transcribe", subtitle: "Transcribe new incoming voice messages by themselves.", icon: "bell", value: nameOf(AUTO_MODES, s.auto || "off").replace(" only", ""), last: true,
@@ -684,7 +678,7 @@ const implementation = (() => {
     for (const k of Object.keys(defaults)) if (s[k] === undefined) missing[k] = defaults[k];
     if (Object.keys(missing).length) rainStore.useStore.getState().updateSettings(missing);
     loadSaved();
-    if (!patchRender()) toast("Voice Messages to Text: could not find the message list, text above voice messages is unavailable");
+    if (!patchRender()) toast("Voice Messages to Text: could not find the message list, transcripts below voice messages are unavailable");
     if (!patchActionSheet()) toast("Voice Messages to Text: could not add the menu entry");
     try { FluxDispatcher.subscribe("MESSAGE_CREATE", onCreate); unpatches.push(() => FluxDispatcher.unsubscribe("MESSAGE_CREATE", onCreate)); } catch (_) {}
   }
