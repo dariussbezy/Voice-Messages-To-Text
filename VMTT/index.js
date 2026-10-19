@@ -423,67 +423,57 @@ const implementation = (() => {
     try { clipboard.setString(text); toast("Copied"); } catch (_) { toast("Could not copy"); }
   }
 
-  /* ---- transcript displayed below the voice player ---- */
-  function stripOurs(nodes) {
-    const out = [];
-    for (const n of nodes) {
-      if (n && n.__vt) continue;
-      if (n && Array.isArray(n.content)) {
-        const inner = stripOurs(n.content);
-        if (!inner.length && n.content.length) continue;
-        out.push(inner.length === n.content.length ? n : Object.assign({}, n, { content: inner }));
-      } else out.push(n);
-    }
-    return out;
+  /* ---- transcript below the rendered voice player ---- */
+  function findTranscriptInProps(root) {
+    const seen = new Set();
+    const visit = (value, depth) => {
+      if (!value || typeof value !== "object" || depth > 4 || seen.has(value)) return null;
+      seen.add(value);
+      for (const key of ["id", "messageId", "message_id"]) {
+        const id = value[key];
+        if (id != null) {
+          const transcript = transcripts.get(String(id));
+          if (transcript) return { message: value, transcript };
+        }
+      }
+      for (const key of ["message", "messageRecord", "messageData", "attachment", "item", "data", "props"]) {
+        const hit = visit(value[key], depth + 1);
+        if (hit) return hit;
+      }
+      return null;
+    };
+    return visit(root, 0);
   }
-  function decorate(row, input) {
-    const m = row && row.message;
-    if (!m) return row;
-    const rowType = input && input.rowType !== undefined ? input.rowType : row.rowType;
-    const found = cfg().inline === false ? null : transcripts.get(String(m.id));
-    if (rowType !== 1 && !found) return row;
-    // Restore content mutated by older versions before adding the React sibling.
-    const ours = !!m.__vtOut && m.content === m.__vtOut;
-    if (ours) m.content = m.__vtBase;
-    else if (Array.isArray(m.content)) {
-      const clean = stripOurs(m.content);
-      if (clean.length !== m.content.length) m.content = clean;
-    }
-    if (!found) return row;
-
-    const mine = !!(m.author && String(m.author.id) === myId());
-    const transcript = React.createElement(RN.View, {
-      key: "vt-transcript-" + String(m.id),
-      style: {
-        marginTop: 5,
-        marginLeft: mine ? 16 : 68,
-        marginRight: mine ? 16 : 18,
-        alignItems: mine ? "flex-end" : "flex-start",
-        backgroundColor: "transparent",
-      },
+  function transcriptAfterPlayer(hit) {
+    const mine = !!(hit.message && hit.message.author && String(hit.message.author.id) === myId());
+    return React.createElement(RN.View, {
+      key: "vt-transcript-" + String(hit.transcript.id),
+      style: { marginTop: 6, maxWidth: "100%", alignSelf: mine ? "flex-end" : "flex-start", backgroundColor: "transparent" },
     }, React.createElement(RN.Text, {
       selectable: true,
       style: { color: ACCENT, fontSize: 16, lineHeight: 22 },
-    }, found.text));
-
-    // RowManager.generate returns the whole message row. A Fragment sibling
-    // places this native text block after the row, so it follows the audio
-    // player instead of being reordered into Discord's message-content slot.
-    return React.createElement(React.Fragment, { key: row.key || ("vt-row-" + String(m.id)) }, row, transcript);
+    }, hit.transcript.text));
   }
   function onRenderError() {
     renderErrors++;
     if (renderErrors >= 3 && renderUnpatch) {
       try { renderUnpatch(); } catch (_) {}
       renderUnpatch = null;
-      toast("Voice Messages to Text: inline transcripts were turned off after repeated errors");
+      toast("Voice Messages to Text: transcripts below voice messages were turned off after repeated errors");
     }
   }
   function patchRender() {
-    const RowManager = safe(() => findByName("RowManager"), null);
-    if (!RowManager || !RowManager.prototype || typeof RowManager.prototype.generate !== "function") return false;
-    renderUnpatch = rainRuntime.api.patcher.after("generate", RowManager.prototype, (args, ret) => {
-      try { return decorate(ret, args[0]); } catch (_) { onRenderError(); return ret; }
+    let VoiceMessageChat = safe(() => findByName("VoiceMessageChat"), null);
+    if (!VoiceMessageChat) VoiceMessageChat = safe(() => findByName("VoiceMessageChat", false), null);
+    const target = VoiceMessageChat && (VoiceMessageChat.default || VoiceMessageChat);
+    if (!target) return false;
+    renderUnpatch = rainRuntime.api.patcher.after("type", target, (args, ret) => {
+      try {
+        if (cfg().inline === false) return ret;
+        const hit = findTranscriptInProps(args && args[0]);
+        if (!hit) return ret;
+        return React.createElement(React.Fragment, null, ret, transcriptAfterPlayer(hit));
+      } catch (_) { onRenderError(); return ret; }
     });
     return true;
   }
@@ -678,7 +668,7 @@ const implementation = (() => {
     for (const k of Object.keys(defaults)) if (s[k] === undefined) missing[k] = defaults[k];
     if (Object.keys(missing).length) rainStore.useStore.getState().updateSettings(missing);
     loadSaved();
-    if (!patchRender()) toast("Voice Messages to Text: could not find the message list, transcripts below voice messages are unavailable");
+    if (!patchRender()) toast("Voice Messages to Text: could not find the voice player component; use the transcript card instead");
     if (!patchActionSheet()) toast("Voice Messages to Text: could not add the menu entry");
     try { FluxDispatcher.subscribe("MESSAGE_CREATE", onCreate); unpatches.push(() => FluxDispatcher.unsubscribe("MESSAGE_CREATE", onCreate)); } catch (_) {}
   }
