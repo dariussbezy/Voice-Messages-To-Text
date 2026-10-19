@@ -26,7 +26,7 @@ const implementation = (() => {
   const common = metro.common || {};
   const stores = common.stores || {};
 
-  const BUILD = "v1.1.8";
+  const BUILD = "v1.1.9";
   const SHEET_KEY = "voice-transcript";
   const FLAG_VOICE = 8192;
   const FLAG_TOGGLE = 0x04000000;
@@ -395,7 +395,11 @@ const implementation = (() => {
     const id = message && message.id ? String(message.id) : "";
     const att = voiceAttachment(message);
     if (!id || !att) { if (!o.auto) toast("This is not a voice message"); return; }
-    if (transcripts.has(id)) { if (!o.auto) openResult(id); return; }
+    if (transcripts.has(id)) {
+      if (!o.auto && cfg().card === true) openResult(id);
+      else if (!o.auto) toast("Transcript already saved. Open the message menu to view it.");
+      return;
+    }
     if (busy.has(id)) { if (!o.auto) toast("Already transcribing this message"); return; }
     busy.add(id);
     if (!o.auto) toast("Transcribing…");
@@ -407,7 +411,8 @@ const implementation = (() => {
       refreshRow(channelId, id);
       if (!o.auto) {
         const inlineWorks = cfg().inline !== false && !!renderUnpatch;
-        if (cfg().card === true || !inlineWorks) { if (!openResult(id)) toast(text.slice(0, 120)); }
+        if (cfg().card === true) openResult(id);
+        else if (!inlineWorks) toast("Transcript saved. Open the message menu to view it.");
       }
     } catch (e) {
       if (!o.auto || configured()) toast("Transcription failed: " + errText(e));
@@ -668,7 +673,7 @@ const implementation = (() => {
     for (const k of Object.keys(defaults)) if (s[k] === undefined) missing[k] = defaults[k];
     if (Object.keys(missing).length) rainStore.useStore.getState().updateSettings(missing);
     loadSaved();
-    if (!patchRender()) toast("Voice Messages to Text: could not find the voice player component; use the transcript card instead");
+    if (!patchRender()) toast("Voice Messages to Text: inline transcripts are unavailable; open saved text from the message menu");
     if (!patchActionSheet()) toast("Voice Messages to Text: could not add the menu entry");
     try { FluxDispatcher.subscribe("MESSAGE_CREATE", onCreate); unpatches.push(() => FluxDispatcher.unsubscribe("MESSAGE_CREATE", onCreate)); } catch (_) {}
   }
