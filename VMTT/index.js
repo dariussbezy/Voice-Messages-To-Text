@@ -31,6 +31,7 @@ const implementation = (() => {
   const FLAG_VOICE = 8192;
   const FLAG_TOGGLE = 0x04000000;
   const ACCENT = "#8EA1FF";
+  const INLINE = new Set(["text", "strong", "em", "u", "s", "inlineCode", "customEmoji"]);
   const MAX_TRANSCRIPTS = 200;
   const TIMEOUT = 90000;
   const PROVIDERS = {
@@ -426,7 +427,12 @@ const implementation = (() => {
   /* ---- inline text above the voice message ---- */
   function paint(nodes, color) {
     if (!color) return nodes;
-    return [{ type: "link", target: "usernameOnClick", context: { username: "", usernameOnClick: { action: "0", userId: "0", linkColor: color, messageChannelId: "0" } }, content: nodes }];
+    // Match Quick Translate: Discord's message parser expects only inline AST
+    // nodes inside the colored link. Passing other node types can make voice
+    // message transcripts render in the dark native transcript pill.
+    const inlineNodes = nodes.filter((node) => node && INLINE.has(node.type));
+    if (!inlineNodes.length) return [];
+    return [{ type: "link", target: "usernameOnClick", context: { username: "", usernameOnClick: { action: "0", userId: "0", linkColor: color, messageChannelId: "0" } }, content: inlineNodes }];
   }
   function stripOurs(nodes) {
     const out = [];
@@ -463,7 +469,10 @@ const implementation = (() => {
     const color = pc ? pc(ACCENT) : null;
     const text = [{ type: "text", content: tr.text, __vt: true }];
     const gap = () => ({ type: "text", content: "\n", __vt: true });
-    const out = base.length ? base.concat([gap(), gap()], paint(text, color)) : paint(text, color);
+    const translated = paint(text, color);
+    // Keep the transcript in the same message AST, after the audio row's
+    // original content, just like Quick Translate's immersive mode.
+    const out = base.length ? base.concat([gap(), gap()], translated) : translated;
     m.__vtBase = base;
     m.__vtOut = out;
     m.content = out;
