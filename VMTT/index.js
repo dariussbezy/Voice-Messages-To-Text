@@ -1,7 +1,7 @@
 const rainRuntime = globalThis.rain;
 // Free server (no API key for users): deploy worker.js on Cloudflare once, then put its address here.
 // DEFAULT_TOKEN must match the TOKEN variable of the worker (leave both empty for an open worker).
-const DEFAULT_SERVER = "";
+const DEFAULT_SERVER = "https://small-bread-a3d3.dariussbezy.workers.dev";
 const DEFAULT_TOKEN = "";
 if (!rainRuntime || !rainRuntime.api || !rainRuntime.api.storage) throw new Error("Discord plugin API unavailable");
 const rainStore = rainRuntime.api.storage.createPluginStore("voicetotext", {
@@ -26,7 +26,7 @@ const implementation = (() => {
   const common = metro.common || {};
   const stores = common.stores || {};
 
-  const BUILD = "v1.1.1";
+  const BUILD = "v1.1.2";
   const SHEET_KEY = "voice-transcript";
   const FLAG_VOICE = 8192;
   const FLAG_TOGGLE = 0x04000000;
@@ -34,11 +34,9 @@ const implementation = (() => {
   const MAX_TRANSCRIPTS = 200;
   const TIMEOUT = 90000;
   const PROVIDERS = {
-    server: { name: "Free server", base: "", byUrl: true, server: true, models: [["whisper-large-v3-turbo", "Whisper large v3 turbo"]] },
+    server: { name: "Free server (no key)", base: "", byUrl: true, server: true, models: [["whisper-large-v3-turbo", "Whisper large v3 turbo"]] },
     groq: { name: "Groq", base: "https://api.groq.com/openai/v1", byUrl: true,
       models: [["whisper-large-v3-turbo", "Whisper large v3 turbo (fast)"], ["whisper-large-v3", "Whisper large v3 (accurate)"]] },
-    openai: { name: "OpenAI", base: "https://api.openai.com/v1", byUrl: false,
-      models: [["whisper-1", "Whisper 1"], ["gpt-4o-mini-transcribe", "GPT-4o mini Transcribe"], ["gpt-4o-transcribe", "GPT-4o Transcribe"]] },
   };
   const LANGS = [["auto", "Auto-detect"], ["en", "English"], ["ro", "Romanian"], ["es", "Spanish"], ["fr", "French"], ["de", "German"], ["it", "Italian"],
     ["pt", "Portuguese"], ["ru", "Russian"], ["uk", "Ukrainian"], ["pl", "Polish"], ["nl", "Dutch"], ["tr", "Turkish"], ["ar", "Arabic"], ["he", "Hebrew"],
@@ -63,7 +61,7 @@ const implementation = (() => {
   const setSetting = (key, value) => rainStore.useStore.getState().updateSettings({ [key]: value });
   const toast = (t) => { try { ui.toasts.showToast(t); } catch (_) {} };
   const safe = (fn, fallback) => { try { return fn(); } catch (_) { return fallback; } };
-  const provider = () => PROVIDERS[cfg().provider] || PROVIDERS.groq;
+  const provider = () => PROVIDERS[cfg().provider] || (DEFAULT_SERVER ? PROVIDERS.server : PROVIDERS.groq);
   const serverEndpoint = () => String(cfg().serverUrl || "").trim() || DEFAULT_SERVER;
   const configured = () => (provider().server ? !!serverEndpoint() : !!String(cfg().apiKey || "").trim());
   const nameOf = (list, code) => { const hit = list.find((x) => x[0] === code); return hit ? hit[1] : String(code); };
@@ -605,7 +603,7 @@ const implementation = (() => {
         KitTile({ k: "key", size: 34 }),
         h(RN.View, { style: { flex: 1 } },
           h(RN.Text, { style: { color: C.text, fontSize: 16, fontWeight: "600" } }, "API key"),
-          h(RN.Text, { style: { color: C.sub, fontSize: 13, marginTop: 2 } }, "Your own " + provider().name + " key. Stays on this device.")),
+          h(RN.Text, { style: { color: C.sub, fontSize: 13, marginTop: 2 } }, "Get it free: open console.groq.com/keys, tap Create API Key, then paste it here. Stays on this device.")),
         h(RN.Pressable, { onPress: () => setShown(!shown), hitSlop: 10, style: ({ pressed }) => ({ paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, backgroundColor: pressed ? C.press : C.chip }) },
           h(RN.Text, { style: { color: C.text, fontSize: 13, fontWeight: "600" } }, shown ? "Hide" : "Show"))),
       h(CustomInput, { value, placeholder: "Paste your API key", secureTextEntry: !shown, autoCapitalize: "none", autoCorrect: false, spellCheck: false,
@@ -633,7 +631,7 @@ const implementation = (() => {
       trailing: h(CustomSwitch, { value: s[key] !== false && !!s[key], onChange: (v) => { setSetting(key, v); redraw(); if (after) after(v); } }) });
     const model = p.models.some((x) => x[0] === s.model) ? s.model : p.models[0][0];
     const guide = h(KitGuide, { key: "guide", title: "Quick guide", steps: [
-      ["Choose a service", "Free server needs no key: it only needs the server address (see the setup note). Or use your own key from console.groq.com (free tier) or OpenAI, then tap Test connection."],
+      ["Choose a service", "Free server (no key) works right away, nothing to paste. Or pick Groq (also free) and paste your own API key: open console.groq.com/keys, sign in, tap Create API Key, copy it here, then tap Test connection."],
       ["Transcribe a message", "Long-press any voice message and choose Transcribe voice message. The text appears right under the voice message. Long-press it again to copy it."],
       ["Language", "Auto-detect works for most voice messages. Pick a language if short messages are misread."],
       ["Automatic mode", "Transcribes new incoming voice messages by itself, in direct messages or in every chat. Each one is a request to your service, so it uses your quota."],
@@ -641,12 +639,12 @@ const implementation = (() => {
     ] });
     return h(RN.ScrollView, { style: { flex: 1 }, keyboardShouldPersistTaps: "handled", contentContainerStyle: { padding: 16, paddingBottom: 42 } },
       h(KitHero, { key: "hero", icon: "mic", title: "Voice Messages to Text", subtitle: "Read voice messages as text", stats: [["Transcribed", transcripts.size], ["Service", p.name]] }),
-      h(CustomSection, { key: "service", title: "Service", footer: p.server ? "No API key needed. The link to the audio is sent to the server only when a message is transcribed." : "Audio is sent to the selected service only when a message is transcribed." },
+      h(CustomSection, { key: "service", title: "Service", footer: p.server ? "No API key needed. Or switch to Groq to use your own key. The link to the audio is sent to the server only when a message is transcribed." : "Audio is sent to the selected service only when a message is transcribed." },
         h(SelectRow, { key: "provider", title: "Service", icon: "server", value: p.name, onPress: () => pick("Service", "VTProvider", Object.keys(PROVIDERS).map((k) => [k, PROVIDERS[k].name]), s.provider,
           (v) => { setSetting("provider", v); setSetting("model", PROVIDERS[v].models[0][0]); redraw(); }) }),
         p.server ? null : h(SelectRow, { key: "model", title: "Model", icon: "power", value: nameOf(p.models, model).split(" (")[0], onPress: () => pick("Model", "VTModel", p.models, model, (v) => { setSetting("model", v); redraw(); }) }),
         h(SelectRow, { key: "language", title: "Language", icon: "lang", value: nameOf(LANGS, s.language), last: false, onPress: () => pick("Language", "VTLanguage", LANGS, s.language, (v) => { setSetting("language", v); redraw(); }) }),
-        p.server ? h(UrlField, { key: "url" }) : h(KeyField, { key: "key" + s.provider }),
+        p.server ? (DEFAULT_SERVER ? null : h(UrlField, { key: "url" })) : h(KeyField, { key: "key" + s.provider }),
         h(CustomAction, { key: "test", title: "Test connection", secondary: true, compact: true, onPress: testConnection })),
       h(CustomSection, { key: "display", title: "Display" },
         toggle("inline", "Show under message", "Show the text right under the voice message.", "text"),
