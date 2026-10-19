@@ -11,6 +11,7 @@ const rainStore = rainRuntime.api.storage.createPluginStore("voicetotext", {
   model: "whisper-large-v3-turbo",
   language: "auto",
   inline: true,
+  position: "under",
   card: false,
   auto: "off",
   saveTranscripts: true,
@@ -26,7 +27,7 @@ const implementation = (() => {
   const common = metro.common || {};
   const stores = common.stores || {};
 
-  const BUILD = "v1.1.2";
+  const BUILD = "v1.1.3";
   const SHEET_KEY = "voice-transcript";
   const FLAG_VOICE = 8192;
   const FLAG_TOGGLE = 0x04000000;
@@ -42,6 +43,7 @@ const implementation = (() => {
     ["pt", "Portuguese"], ["ru", "Russian"], ["uk", "Ukrainian"], ["pl", "Polish"], ["nl", "Dutch"], ["tr", "Turkish"], ["ar", "Arabic"], ["he", "Hebrew"],
     ["hi", "Hindi"], ["ja", "Japanese"], ["ko", "Korean"], ["zh", "Chinese"], ["cs", "Czech"], ["sv", "Swedish"], ["hu", "Hungarian"], ["el", "Greek"],
     ["bg", "Bulgarian"], ["id", "Indonesian"], ["vi", "Vietnamese"], ["th", "Thai"]];
+  const POSITIONS = [["under", "Under the voice message"], ["above", "Above the voice message"]];
   const AUTO_MODES = [["off", "Off"], ["dms", "Direct messages only"], ["all", "All chats"]];
 
   const unpatches = [];
@@ -444,8 +446,17 @@ const implementation = (() => {
     const m = row && row.message;
     if (!m) return;
     const rowType = input && input.rowType !== undefined ? input.rowType : row.rowType;
-    const tr = cfg().inline === false ? null : transcripts.get(String(m.id));
-    if (rowType !== 1 && !tr) return;
+    const found = cfg().inline === false ? null : transcripts.get(String(m.id));
+    if (rowType !== 1 && !found) return;
+    const above = cfg().position === "above";
+    const tr = above ? found : null;
+    const embeds = Array.isArray(m.embeds) ? m.embeds : [];
+    const cleanEmbeds = embeds.filter((e) => !(e && e.__vt));
+    if (found && !above) {
+      const pc0 = RN.processColor;
+      const txt = String(found.text);
+      m.embeds = cleanEmbeds.concat([{ id: "vt-" + m.id, type: "rich", __vt: true, rawDescription: txt, description: txt, color: pc0 ? pc0(ACCENT) : undefined, fields: [] }]);
+    } else if (cleanEmbeds.length !== embeds.length) m.embeds = cleanEmbeds;
     const ours = !!m.__vtOut && m.content === m.__vtOut;
     if (!tr) {
       if (ours) m.content = m.__vtBase;
@@ -648,6 +659,8 @@ const implementation = (() => {
         h(CustomAction, { key: "test", title: "Test connection", secondary: true, compact: true, onPress: testConnection })),
       h(CustomSection, { key: "display", title: "Display" },
         toggle("inline", "Show under message", "Show the text right under the voice message.", "text"),
+        h(SelectRow, { key: "position", title: "Text position", icon: "text", value: nameOf(POSITIONS, s.position || "under").replace(" the voice message", ""),
+          onPress: () => pick("Text position", "VTPosition", POSITIONS, s.position || "under", (v) => { setSetting("position", v); Array.from(transcripts.values()).forEach((t) => refreshRow(t.channelId, t.id)); redraw(); }) }),
         toggle("card", "Also open a result card", "Open a card with a Copy button when the text is ready.", "guide", true)),
       h(CustomSection, { key: "auto", title: "Automatic" },
         h(SelectRow, { key: "auto", title: "Auto-transcribe", subtitle: "Transcribe new incoming voice messages by themselves.", icon: "bell", value: nameOf(AUTO_MODES, s.auto || "off").replace(" only", ""), last: true,
@@ -665,7 +678,7 @@ const implementation = (() => {
     if (!loadRequested || initialized) return;
     initialized = true;
     const s = cfg();
-    const defaults = { provider: DEFAULT_SERVER ? "server" : "groq", serverUrl: "", model: "whisper-large-v3-turbo", language: "auto", inline: true, card: false, auto: "off", saveTranscripts: true };
+    const defaults = { provider: DEFAULT_SERVER ? "server" : "groq", serverUrl: "", model: "whisper-large-v3-turbo", language: "auto", inline: true, position: "under", card: false, auto: "off", saveTranscripts: true };
     const missing = {};
     for (const k of Object.keys(defaults)) if (s[k] === undefined) missing[k] = defaults[k];
     if (Object.keys(missing).length) rainStore.useStore.getState().updateSettings(missing);
