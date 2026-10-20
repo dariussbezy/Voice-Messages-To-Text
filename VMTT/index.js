@@ -27,7 +27,7 @@ const implementation = (() => {
   const common = metro.common || {};
   const stores = common.stores || {};
 
-  const BUILD = "v1.1.13";
+  const BUILD = "v1.1.14";
   const SHEET_KEY = "voice-transcript";
   const FLAG_VOICE = 8192;
   const FLAG_TOGGLE = 0x04000000;
@@ -43,7 +43,7 @@ const implementation = (() => {
     ["pt", "Portuguese"], ["ru", "Russian"], ["uk", "Ukrainian"], ["pl", "Polish"], ["nl", "Dutch"], ["tr", "Turkish"], ["ar", "Arabic"], ["he", "Hebrew"],
     ["hi", "Hindi"], ["ja", "Japanese"], ["ko", "Korean"], ["zh", "Chinese"], ["cs", "Czech"], ["sv", "Swedish"], ["hu", "Hungarian"], ["el", "Greek"],
     ["bg", "Bulgarian"], ["id", "Indonesian"], ["vi", "Vietnamese"], ["th", "Thai"]];
-  const TEXT_STYLES = [["link", "Colored (recommended)"], ["code", "Code block"], ["plain", "Plain"]];
+  const TEXT_STYLES = [["link", "1. Link (colored)"], ["code", "2. Code block"], ["plain", "3. Plain"], ["title", "4. Title"], ["titlelink", "5. Title as link"], ["field", "6. Field"], ["footer", "7. Footer"], ["author", "8. Author"]];
   const AUTO_MODES = [["off", "Off"], ["dms", "Direct messages only"], ["all", "All chats"]];
 
   const unpatches = [];
@@ -463,11 +463,22 @@ const implementation = (() => {
     // the text goes in an embed: Discord draws embeds after the attachments, so it shows below the voice message
     // plain, standard Discord embed shape (strings only, no custom color) so iOS and Android both draw it with the normal theme colors
     const style = cfg().textStyle || "link";
-    let body = tr.text;
-    // the embed has no text color of its own (black on dark), so give the text one: a markdown link carries its own color
-    if (style === "link") body = "[" + String(tr.text).replace(/([\\\[\]])/g, "\\$1") + "](https://discord.com)";
-    else if (style === "code") body = "```\n" + String(tr.text).replace(/```/g, "'''") + "\n```";
-    const embed = { id: "vt-" + m.id, type: "rich", rawDescription: body, description: body, __vt: true };
+    const raw = String(tr.text);
+    const cut = (n) => (raw.length > n ? raw.slice(0, n - 1) + "\u2026" : raw);
+    const base = { id: "vt-" + m.id, type: "rich", __vt: true };
+    let embed;
+    // each style puts the text in a different part of the embed, because the app draws each part with its own text color
+    if (style === "title") embed = Object.assign(base, { rawTitle: cut(256), title: cut(256) });
+    else if (style === "titlelink") embed = Object.assign(base, { rawTitle: cut(256), title: cut(256), url: "https://discord.com" });
+    else if (style === "field") embed = Object.assign(base, { fields: [{ rawName: "Transcript", name: "Transcript", rawValue: cut(1024), value: cut(1024), inline: false }] });
+    else if (style === "footer") embed = Object.assign(base, { footer: { text: cut(2048) } });
+    else if (style === "author") embed = Object.assign(base, { author: { name: cut(256) } });
+    else {
+      let body = raw;
+      if (style === "link") body = "[" + raw.replace(/([\\\[\]])/g, "\\$1") + "](https://discord.com)";
+      else if (style === "code") body = "```\n" + raw.replace(/```/g, "'''") + "\n```";
+      embed = Object.assign(base, { rawDescription: body, description: body });
+    }
     m.embeds = cleanEmbeds.concat([embed]);
   }
   function onRenderError() {
@@ -655,7 +666,7 @@ const implementation = (() => {
         h(CustomAction, { key: "test", title: "Test connection", secondary: true, compact: true, onPress: testConnection })),
       h(CustomSection, { key: "display", title: "Display" },
         toggle("inline", "Show text below message", "Show the text right below the voice message.", "text"),
-        h(SelectRow, { key: "textStyle", title: "Text style", subtitle: "Pick another one if the text is hard to read.", icon: "text", value: nameOf(TEXT_STYLES, s.textStyle || "link").replace(" (recommended)", ""),
+        h(SelectRow, { key: "textStyle", title: "Text style", subtitle: "Try each one until the text is easy to read.", icon: "text", value: nameOf(TEXT_STYLES, s.textStyle || "link"),
           onPress: () => pick("Text style", "VTStyle", TEXT_STYLES, s.textStyle || "link", (v) => { setSetting("textStyle", v); Array.from(transcripts.values()).forEach((t) => refreshRow(t.channelId, t.id)); redraw(); }) }),
         toggle("card", "Also open a result card", "Open a card with a Copy button when the text is ready.", "guide", true)),
       h(CustomSection, { key: "auto", title: "Automatic" },
