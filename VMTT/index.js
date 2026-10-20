@@ -28,7 +28,7 @@ const implementation = (() => {
   const common = metro.common || {};
   const stores = common.stores || {};
 
-  const BUILD = "v1.1.16";
+  const BUILD = "v1.1.17";
   const SHEET_KEY = "voice-transcript";
   const VOICE_MESSAGE_COMPONENT_PATH = "modules/voice_messages/native/components/VoiceMessageChat.tsx";
   const FLAG_VOICE = 8192;
@@ -550,11 +550,82 @@ const implementation = (() => {
       h(Component, originalProps),
       transcript ? h(RN.Text, { selectable: true, style: { color: ACCENT, fontSize: 16, lineHeight: 22, marginTop: 6, flexShrink: 1 } }, transcript.text) : null);
   }
+  function transcriptView(player, transcript) {
+    return React.createElement(RN.View, { style: { alignSelf: "stretch" } },
+      player,
+      React.createElement(RN.Text, { selectable: true, style: { color: ACCENT, fontSize: 16, lineHeight: 22, marginTop: 6, flexShrink: 1 } }, transcript.text));
+  }
+  function patchWrappedComponentType(type) {
+    if (!type || typeof type !== "object") return null;
+    if (typeof type.render === "function") {
+      const originalRender = type.render;
+      const wrappedRender = function(props, ref) {
+        const player = originalRender.call(this, props, ref);
+        const transcript = cfg().inline !== false && cfg().position === "below" ? transcriptForVoiceProps(props) : null;
+        return transcript ? transcriptView(player, transcript) : player;
+      };
+      try { type.render = wrappedRender; }
+      catch (_) { return null; }
+      return () => { try { if (type.render === wrappedRender) type.render = originalRender; } catch (_) {} };
+    }
+    if (type.$$typeof === Symbol.for("react.memo") && type.type) {
+      const originalType = type.type;
+      let wrappedType = originalType;
+      let restoreInner = null;
+      if (typeof originalType === "function") {
+        wrappedType = function VoiceTranscriptMemoInner(props) {
+          const transcript = cfg().inline !== false && cfg().position === "below" ? transcriptForVoiceProps(props) : null;
+          const player = React.createElement(originalType, props);
+          return transcript ? transcriptView(player, transcript) : player;
+        };
+      } else {
+        restoreInner = patchWrappedComponentType(originalType);
+        if (!restoreInner) return null;
+      }
+      try { type.type = wrappedType; }
+      catch (_) { if (restoreInner) restoreInner(); return null; }
+      return () => {
+        try { if (type.type === wrappedType) type.type = originalType; } catch (_) {}
+        if (restoreInner) restoreInner();
+      };
+    }
+    return null;
+  }
+  function patchElementFactories(component) {
+    const installed = [];
+    const patchFactory = (target, method) => {
+      if (!target || typeof target[method] !== "function") return;
+      try {
+        installed.push(patcher.instead(method, target, (args, original) => {
+          if (!args || args[0] !== component) return original(...args);
+          const props = args[1] || {};
+          const transcript = cfg().inline !== false && cfg().position === "below" ? transcriptForVoiceProps(props) : null;
+          const player = original(...args);
+          return transcript ? transcriptView(player, transcript) : player;
+        }));
+      } catch (_) {}
+    };
+    patchFactory(React, "createElement");
+    const jsxRuntime = safe(() => findByProps("jsx", "jsxs"), null);
+    patchFactory(jsxRuntime, "jsx");
+    patchFactory(jsxRuntime, "jsxs");
+    patchFactory(jsxRuntime, "jsxDEV");
+    if (!installed.length) return null;
+    return () => installed.splice(0).forEach((unpatch) => { try { unpatch(); } catch (_) {} });
+  }
   function patchVoiceMessageComponent() {
     const findByFilePath = metro.findByFilePath;
-    if (typeof findByFilePath !== "function") return false;
-    const exports = safe(() => findByFilePath(VOICE_MESSAGE_COMPONENT_PATH, false), null);
-    if (!exports || typeof exports.default !== "function") return false;
+    const exports = typeof findByFilePath === "function" ? safe(() => findByFilePath(VOICE_MESSAGE_COMPONENT_PATH, false), null) : null;
+    if (!exports || !exports.default) {
+      const component = safe(() => findByName("VoiceMessageChat"), null);
+      if (!component) return false;
+      voiceComponentUnpatch = typeof component === "function" ? patchElementFactories(component) : patchWrappedComponentType(component);
+      return !!voiceComponentUnpatch;
+    }
+    if (typeof exports.default !== "function") {
+      voiceComponentUnpatch = patchWrappedComponentType(exports.default);
+      return !!voiceComponentUnpatch;
+    }
     try {
       voiceComponentUnpatch = patcher.instead("default", exports, (args, original) => {
         const originalProps = args && args[0] || {};
