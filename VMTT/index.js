@@ -11,6 +11,7 @@ const rainStore = rainRuntime.api.storage.createPluginStore("voicetotext", {
   model: "whisper-large-v3-turbo",
   language: "auto",
   inline: true,
+  textStyle: "link",
   card: false,
   auto: "off",
   saveTranscripts: true,
@@ -26,7 +27,7 @@ const implementation = (() => {
   const common = metro.common || {};
   const stores = common.stores || {};
 
-  const BUILD = "v1.1.12";
+  const BUILD = "v1.1.13";
   const SHEET_KEY = "voice-transcript";
   const FLAG_VOICE = 8192;
   const FLAG_TOGGLE = 0x04000000;
@@ -42,6 +43,7 @@ const implementation = (() => {
     ["pt", "Portuguese"], ["ru", "Russian"], ["uk", "Ukrainian"], ["pl", "Polish"], ["nl", "Dutch"], ["tr", "Turkish"], ["ar", "Arabic"], ["he", "Hebrew"],
     ["hi", "Hindi"], ["ja", "Japanese"], ["ko", "Korean"], ["zh", "Chinese"], ["cs", "Czech"], ["sv", "Swedish"], ["hu", "Hungarian"], ["el", "Greek"],
     ["bg", "Bulgarian"], ["id", "Indonesian"], ["vi", "Vietnamese"], ["th", "Thai"]];
+  const TEXT_STYLES = [["link", "Colored (recommended)"], ["code", "Code block"], ["plain", "Plain"]];
   const AUTO_MODES = [["off", "Off"], ["dms", "Direct messages only"], ["all", "All chats"]];
 
   const unpatches = [];
@@ -460,7 +462,12 @@ const implementation = (() => {
     if (!tr) return;
     // the text goes in an embed: Discord draws embeds after the attachments, so it shows below the voice message
     // plain, standard Discord embed shape (strings only, no custom color) so iOS and Android both draw it with the normal theme colors
-    const embed = { id: "vt-" + m.id, type: "rich", rawDescription: tr.text, description: tr.text, __vt: true };
+    const style = cfg().textStyle || "link";
+    let body = tr.text;
+    // the embed has no text color of its own (black on dark), so give the text one: a markdown link carries its own color
+    if (style === "link") body = "[" + String(tr.text).replace(/([\\\[\]])/g, "\\$1") + "](https://discord.com)";
+    else if (style === "code") body = "```\n" + String(tr.text).replace(/```/g, "'''") + "\n```";
+    const embed = { id: "vt-" + m.id, type: "rich", rawDescription: body, description: body, __vt: true };
     m.embeds = cleanEmbeds.concat([embed]);
   }
   function onRenderError() {
@@ -648,6 +655,8 @@ const implementation = (() => {
         h(CustomAction, { key: "test", title: "Test connection", secondary: true, compact: true, onPress: testConnection })),
       h(CustomSection, { key: "display", title: "Display" },
         toggle("inline", "Show text below message", "Show the text right below the voice message.", "text"),
+        h(SelectRow, { key: "textStyle", title: "Text style", subtitle: "Pick another one if the text is hard to read.", icon: "text", value: nameOf(TEXT_STYLES, s.textStyle || "link").replace(" (recommended)", ""),
+          onPress: () => pick("Text style", "VTStyle", TEXT_STYLES, s.textStyle || "link", (v) => { setSetting("textStyle", v); Array.from(transcripts.values()).forEach((t) => refreshRow(t.channelId, t.id)); redraw(); }) }),
         toggle("card", "Also open a result card", "Open a card with a Copy button when the text is ready.", "guide", true)),
       h(CustomSection, { key: "auto", title: "Automatic" },
         h(SelectRow, { key: "auto", title: "Auto-transcribe", subtitle: "Transcribe new incoming voice messages by themselves.", icon: "bell", value: nameOf(AUTO_MODES, s.auto || "off").replace(" only", ""), last: true,
