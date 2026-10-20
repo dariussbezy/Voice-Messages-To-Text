@@ -11,8 +11,6 @@ const rainStore = rainRuntime.api.storage.createPluginStore("voicetotext", {
   model: "whisper-large-v3-turbo",
   language: "auto",
   inline: true,
-  position: "above",
-  textStyle: "link",
   card: false,
   auto: "off",
   saveTranscripts: true,
@@ -28,9 +26,8 @@ const implementation = (() => {
   const common = metro.common || {};
   const stores = common.stores || {};
 
-  const BUILD = "v1.1.18";
+  const BUILD = "v1.1.20";
   const SHEET_KEY = "voice-transcript";
-  const VOICE_MESSAGE_COMPONENT_PATH = "modules/voice_messages/native/components/VoiceMessageChat.tsx";
   const FLAG_VOICE = 8192;
   const FLAG_TOGGLE = 0x04000000;
   const ACCENT = "#8EA1FF";
@@ -45,14 +42,11 @@ const implementation = (() => {
     ["pt", "Portuguese"], ["ru", "Russian"], ["uk", "Ukrainian"], ["pl", "Polish"], ["nl", "Dutch"], ["tr", "Turkish"], ["ar", "Arabic"], ["he", "Hebrew"],
     ["hi", "Hindi"], ["ja", "Japanese"], ["ko", "Korean"], ["zh", "Chinese"], ["cs", "Czech"], ["sv", "Swedish"], ["hu", "Hungarian"], ["el", "Greek"],
     ["bg", "Bulgarian"], ["id", "Indonesian"], ["vi", "Vietnamese"], ["th", "Thai"]];
-  const TEXT_STYLES = [["link", "1. Link (colored)"], ["code", "2. Code block"], ["plain", "3. Plain"], ["title", "4. Title"], ["titlelink", "5. Title as link"], ["field", "6. Field"], ["footer", "7. Footer"], ["author", "8. Author"]];
   const AUTO_MODES = [["off", "Off"], ["dms", "Direct messages only"], ["all", "All chats"]];
 
   const unpatches = [];
   const timers = [];
   const transcripts = new Map();
-  const voiceAttachmentOwners = new Map();
-  const voiceAttachmentObjectOwners = new WeakMap();
   const busy = new Set();
   let ThemeStore;
   let partsCache = null;
@@ -60,7 +54,6 @@ const implementation = (() => {
   let initialized = false;
   let hydrationUnsubscribe = null;
   let renderUnpatch = null;
-  let voiceComponentUnpatch = null;
   let renderErrors = 0;
   let sheetState = { id: null };
 
@@ -426,6 +419,17 @@ const implementation = (() => {
     persist();
     if (t) refreshRow(t.channelId, id);
   }
+  function quickTranslateActions(transcript) {
+    const api = safe(() => globalThis.__rainQuickTranslateTextBridge, null);
+    if (!api || !safe(() => api.isActive(), false) || !transcript) return [];
+    const message = {
+      id: String(transcript.id || ""),
+      channel_id: String(transcript.channelId || ""),
+      content: String(transcript.text || ""),
+    };
+    const actions = safe(() => api.getMessageActions(message), []);
+    return Array.isArray(actions) ? actions : [];
+  }
   function copyText(text) {
     try { clipboard.setString(text); toast("Copied"); } catch (_) { toast("Could not copy"); }
   }
@@ -438,7 +442,7 @@ const implementation = (() => {
   function stripOurs(nodes) {
     const out = [];
     for (const n of nodes) {
-      if (n && n.__vt) continue;
+      if (n && (n.__vt || n.__tr)) continue;
       if (n && Array.isArray(n.content)) {
         const inner = stripOurs(n.content);
         if (!inner.length && n.content.length) continue;
@@ -451,24 +455,19 @@ const implementation = (() => {
     const m = row && row.message;
     if (!m) return;
     const rowType = input && input.rowType !== undefined ? input.rowType : row.rowType;
-    rememberVoiceAttachmentOwner(m);
     const found = cfg().inline === false ? null : transcripts.get(String(m.id));
     if (rowType !== 1 && !found) return;
     const tr = found;
-    const below = cfg().position === "below";
-    // remove any embed added earlier (it is added again below when needed)
+    // Clean up transient transcript embeds written by older versions.
     const embeds = Array.isArray(m.embeds) ? m.embeds : [];
     const cleanEmbeds = embeds.filter((e) => !(e && e.__vt));
     if (cleanEmbeds.length !== embeds.length) m.embeds = cleanEmbeds;
     const ours = !!m.__vtOut && m.content === m.__vtOut;
-    if (!tr || below) {
+    if (!tr) {
       if (ours) m.content = m.__vtBase;
       else if (Array.isArray(m.content)) { const clean = stripOurs(m.content); if (clean.length !== m.content.length) m.content = clean; }
       delete m.__vtOut;
       delete m.__vtBase;
-      if (!tr) return;
-      // BELOW is rendered as a native Text sibling of the player, never as an embed.
-      // The native embed decoder expects a different shape and can render its text black.
       return;
     }
     // ABOVE: the text goes in the message content, coloured with the accent colour
@@ -500,134 +499,6 @@ const implementation = (() => {
     return true;
   }
 
-  function rememberVoiceAttachmentOwner(message) {
-    const attachment = voiceAttachment(message);
-    if (!attachment || !message || !message.id) return;
-    const messageId = String(message.id);
-    voiceAttachmentObjectOwners.set(attachment, messageId);
-    for (const key of ["id", "url", "proxy_url", "proxyUrl", "proxyURL", "src", "uri", "attachment_id", "attachmentId"]) {
-      const value = attachment[key];
-      if (value != null && String(value)) voiceAttachmentOwners.set(String(value), messageId);
-    }
-  }
-  function transcriptForIdentifier(value) {
-    if (value == null) return null;
-    const key = String(value);
-    const direct = transcripts.get(key);
-    if (direct) return direct;
-    const ownerId = voiceAttachmentOwners.get(key);
-    return ownerId ? transcripts.get(ownerId) || null : null;
-  }
-  function transcriptForVoiceProps(props) {
-    try {
-      const visited = new Set();
-      const queue = [{ value: props, depth: 0 }];
-      let examined = 0;
-      while (queue.length && examined++ < 80) {
-        const item = queue.shift();
-        const value = item && item.value;
-        if (!value || typeof value !== "object" || visited.has(value) || item.depth > 5) continue;
-        visited.add(value);
-        const objectOwner = voiceAttachmentObjectOwners.get(value);
-        if (objectOwner && transcripts.has(objectOwner)) return transcripts.get(objectOwner);
-        for (const key of ["messageId", "message_id", "messageID", "channelMessageId", "id", "attachmentId", "attachment_id"]) {
-          const match = transcriptForIdentifier(value[key]);
-          if (match) return match;
-        }
-        if (item.depth < 5) {
-          for (const key of Object.keys(value)) {
-            const child = value[key];
-            if (typeof child === "string") {
-              const match = transcriptForIdentifier(child);
-              if (match) return match;
-            }
-            if (child && typeof child === "object") queue.push({ value: child, depth: item.depth + 1 });
-          }
-        }
-      }
-      return null;
-    } catch (_) { return null; }
-  }
-  function transcriptView(player, transcript) {
-    return React.createElement(RN.View, { style: { alignSelf: "stretch" } },
-      player,
-      React.createElement(RN.Text, { selectable: true, style: { color: ACCENT, fontSize: 16, lineHeight: 22, marginTop: 6, flexShrink: 1 } }, transcript.text));
-  }
-  function patchWrappedComponentType(type) {
-    if (!type || typeof type !== "object") return null;
-    if (typeof type.render === "function") {
-      const originalRender = type.render;
-      const wrappedRender = function(props, ref) {
-        const player = originalRender.call(this, props, ref);
-        const transcript = cfg().inline !== false && cfg().position === "below" ? transcriptForVoiceProps(props) : null;
-        return transcript ? transcriptView(player, transcript) : player;
-      };
-      try { type.render = wrappedRender; }
-      catch (_) { return null; }
-      return () => { try { if (type.render === wrappedRender) type.render = originalRender; } catch (_) {} };
-    }
-    if (type.$$typeof === Symbol.for("react.memo") && type.type) {
-      const originalType = type.type;
-      let wrappedType = originalType;
-      let restoreInner = null;
-      if (typeof originalType === "function") {
-        wrappedType = function VoiceTranscriptMemoInner(props) {
-          const transcript = cfg().inline !== false && cfg().position === "below" ? transcriptForVoiceProps(props) : null;
-          const player = React.createElement(originalType, props);
-          return transcript ? transcriptView(player, transcript) : player;
-        };
-      } else {
-        restoreInner = patchWrappedComponentType(originalType);
-        if (!restoreInner) return null;
-      }
-      try { type.type = wrappedType; }
-      catch (_) { if (restoreInner) restoreInner(); return null; }
-      return () => {
-        try { if (type.type === wrappedType) type.type = originalType; } catch (_) {}
-        if (restoreInner) restoreInner();
-      };
-    }
-    return null;
-  }
-  function patchElementFactories(component) {
-    const installed = [];
-    const patchFactory = (target, method) => {
-      if (!target || typeof target[method] !== "function") return;
-      try {
-        installed.push(patcher.instead(method, target, (args, original) => {
-          if (!args || args[0] !== component) return original(...args);
-          const props = args[1] || {};
-          const transcript = cfg().inline !== false && cfg().position === "below" ? transcriptForVoiceProps(props) : null;
-          const player = original(...args);
-          return transcript ? transcriptView(player, transcript) : player;
-        }));
-      } catch (_) {}
-    };
-    patchFactory(React, "createElement");
-    const jsxRuntime = safe(() => findByProps("jsx", "jsxs"), null);
-    patchFactory(jsxRuntime, "jsx");
-    patchFactory(jsxRuntime, "jsxs");
-    patchFactory(jsxRuntime, "jsxDEV");
-    if (!installed.length) return null;
-    return () => installed.splice(0).forEach((unpatch) => { try { unpatch(); } catch (_) {} });
-  }
-  function patchVoiceMessageComponent() {
-    const findByFilePath = metro.findByFilePath;
-    const exports = typeof findByFilePath === "function" ? safe(() => findByFilePath(VOICE_MESSAGE_COMPONENT_PATH, false), null) : null;
-    if (!exports || !exports.default) {
-      const component = safe(() => findByName("VoiceMessageChat"), null);
-      if (!component) return false;
-      voiceComponentUnpatch = typeof component === "function" ? patchElementFactories(component) : patchWrappedComponentType(component);
-      return !!voiceComponentUnpatch;
-    }
-    if (typeof exports.default !== "function") {
-      voiceComponentUnpatch = patchWrappedComponentType(exports.default);
-      return !!voiceComponentUnpatch;
-    }
-    voiceComponentUnpatch = patchElementFactories(exports.default);
-    return !!voiceComponentUnpatch;
-  }
-
   /* ---- long-press menu on a voice message ---- */
   const MIC_ICONS = ["MicrophoneIcon", "MicIcon", "ic_mic", "ic_microphone"];
   function micAsset() { for (const n of MIC_ICONS) { const id = kitAsset(n); if (id) return id; } return null; }
@@ -639,6 +510,7 @@ const implementation = (() => {
       plan.push({ key: "vt-show", label: "Show transcript", press: () => openResult(id) });
       plan.push({ key: "vt-copy", label: "Copy transcript", press: () => copyText(transcripts.get(id).text) });
       plan.push({ key: "vt-remove", label: "Remove transcript", press: () => removeTranscript(id) });
+      quickTranslateActions(transcripts.get(id)).forEach((action) => plan.push(action));
     } else plan.push({ key: "vt-transcribe", label: "Transcribe voice message", press: () => transcribeMessage(message) });
     return plan;
   }
@@ -650,15 +522,19 @@ const implementation = (() => {
     const group = container[1];
     const children = group.props && group.props.children;
     if (!Array.isArray(children) || !children[0]) return;
-    if (children.some((c) => c && typeof c.key === "string" && c.key.indexOf("vt-") === 0)) return;
     const tpl = children[0];
     const Row = tpl.type;
     const iconId = micAsset();
     const tplIcon = tpl.props && tpl.props.icon;
-    const icon = tplIcon && iconId ? { $$typeof: tplIcon.$$typeof, type: tplIcon.type, key: null, ref: null,
-      props: { IconComponent: () => React.createElement(RN.Image, { resizeMode: "cover", style: { width: 24, height: 24, tintColor: palette().text }, source: iconId }) } } : tplIcon;
-    const rows = plan.map((item) => React.createElement(Row, { key: item.key, label: item.label, icon,
-      onPress: () => { try { lazySheet.hideActionSheet(); } catch (_) {} item.press(); } }));
+    const existingKeys = new Set(children.map((c) => c && typeof c.key === "string" ? c.key : "").filter(Boolean));
+    const rows = plan.filter((item) => !existingKeys.has(item.key)).map((item) => {
+      const itemIconId = item.key.indexOf("qt-") === 0 ? (kitAsset("LanguageIcon") || iconId) : iconId;
+      const icon = tplIcon && itemIconId ? { $$typeof: tplIcon.$$typeof, type: tplIcon.type, key: null, ref: null,
+        props: { IconComponent: () => React.createElement(RN.Image, { resizeMode: "cover", style: { width: 24, height: 24, tintColor: palette().text }, source: itemIconId }) } } : tplIcon;
+      return React.createElement(Row, { key: item.key, label: item.label, icon,
+        onPress: () => { try { lazySheet.hideActionSheet(); } catch (_) {} item.press(); } });
+    });
+    if (!rows.length) return;
     const copyIndex = children.findIndex((c) => c && c.props && ((c.props.label && String(c.props.label).toUpperCase().indexOf("COPY") !== -1) || (c.props.message && String(c.props.message).toUpperCase().indexOf("COPY") !== -1)));
     if (copyIndex !== -1) children.splice(copyIndex, 0, ...rows); else children.push(...rows);
   }
@@ -701,6 +577,7 @@ const implementation = (() => {
     const parts = sheetParts();
     const id = sheetState.id;
     const tr = id ? transcripts.get(id) : null;
+    const qtActions = tr ? quickTranslateActions(tr) : [];
     const sub = tr ? ["Voice message", tr.dur ? fmtDur(tr.dur) : null, tr.by].filter(Boolean).join(" \u00B7 ") : "";
     const again = () => {
       const t = transcripts.get(id);
@@ -723,6 +600,7 @@ const implementation = (() => {
           h(RN.Text, { selectable: true, style: { color: C.text, fontSize: 16, lineHeight: 23 } }, tr ? tr.text : "This transcript is no longer available."))),
       tr ? h(RN.View, { style: { marginTop: 14 } },
         h(CustomAction, { title: "Copy text", compact: true, top: 0, onPress: () => copyText(tr.text) }),
+        qtActions.length ? h(CustomAction, { title: qtActions[0].label, compact: true, secondary: true, top: 10, onPress: () => { closeSheet(); qtActions[0].press(); } }) : null,
         h(CustomAction, { title: "Transcribe again", compact: true, secondary: true, top: 10, onPress: again })) : null);
     return parts.ActionSheet ? h(parts.ActionSheet, null, body) : body;
   }
@@ -780,7 +658,7 @@ const implementation = (() => {
     const model = p.models.some((x) => x[0] === s.model) ? s.model : p.models[0][0];
     const guide = h(KitGuide, { key: "guide", title: "Quick guide", steps: [
       ["Choose a service", "Free server (no key) works right away, nothing to paste. Or pick Groq (also free) and paste your own API key: open console.groq.com/keys, sign in, tap Create API Key, copy it here, then tap Test connection."],
-      ["Transcribe a message", "Long-press any voice message and choose Transcribe voice message. The text appears on the voice message, above or below it (see Display). Long-press it again to copy it."],
+      ["Transcribe a message", "Long-press any voice message and choose Transcribe voice message. The transcript appears above the voice message. Long-press it again to copy it."],
       ["Language", "Auto-detect works for most voice messages. Pick a language if short messages are misread."],
       ["Automatic mode", "Transcribes new incoming voice messages by itself, in direct messages or in every chat. Each one is a request to your service, so it uses your quota."],
       ["Privacy", "The link to the audio is sent to the service you chose when a message is transcribed. Nothing goes anywhere else."],
@@ -795,11 +673,7 @@ const implementation = (() => {
         p.server ? (DEFAULT_SERVER ? null : h(UrlField, { key: "url" })) : h(KeyField, { key: "key" + s.provider }),
         h(CustomAction, { key: "test", title: "Test connection", secondary: true, compact: true, onPress: testConnection })),
       h(CustomSection, { key: "display", title: "Display" },
-        toggle("inline", "Show text on voice messages", "Show the text next to the voice message.", "text"),
-        h(SelectRow, { key: "position", title: "Text position", subtitle: "Below is experimental: some themes draw its text in black.", icon: "text", value: s.position === "below" ? "Below" : "Above",
-          onPress: () => pick("Text position", "VTPosition", [["above", "Above the voice message (readable)"], ["below", "Below the voice message (experimental)"]], s.position === "below" ? "below" : "above", (v) => { setSetting("position", v); Array.from(transcripts.values()).forEach((t) => refreshRow(t.channelId, t.id)); redraw(); }) }),
-        s.position === "below" ? h(SelectRow, { key: "textStyle", title: "Text style (below only)", subtitle: "Try each one until the text is easy to read.", icon: "text", value: nameOf(TEXT_STYLES, s.textStyle || "link"),
-          onPress: () => pick("Text style", "VTStyle", TEXT_STYLES, s.textStyle || "link", (v) => { setSetting("textStyle", v); Array.from(transcripts.values()).forEach((t) => refreshRow(t.channelId, t.id)); redraw(); }) }) : null,
+        toggle("inline", "Show text on voice messages", "Show the transcript above the voice message.", "text"),
         toggle("card", "Also open a result card", "Open a card with a Copy button when the text is ready.", "guide", true)),
       h(CustomSection, { key: "auto", title: "Automatic" },
         h(SelectRow, { key: "auto", title: "Auto-transcribe", subtitle: "Transcribe new incoming voice messages by themselves.", icon: "bell", value: nameOf(AUTO_MODES, s.auto || "off").replace(" only", ""), last: true,
@@ -823,7 +697,6 @@ const implementation = (() => {
     if (Object.keys(missing).length) rainStore.useStore.getState().updateSettings(missing);
     loadSaved();
     if (!patchRender()) toast("Voice Messages to Text: could not find the message list, text on voice messages is unavailable");
-    if (!patchVoiceMessageComponent() && cfg().position === "below") toast("Voice Messages to Text: below-player text is unavailable in this Discord build; switch Text position to Above");
     if (!patchActionSheet()) toast("Voice Messages to Text: could not add the menu entry");
     try { FluxDispatcher.subscribe("MESSAGE_CREATE", onCreate); unpatches.push(() => FluxDispatcher.unsubscribe("MESSAGE_CREATE", onCreate)); } catch (_) {}
   }
@@ -848,10 +721,8 @@ const implementation = (() => {
     for (const t of timers.splice(0)) clearTimeout(t);
     for (const u of unpatches.splice(0)) { try { u(); } catch (_) {} }
     if (renderUnpatch) { try { renderUnpatch(); } catch (_) {} renderUnpatch = null; }
-    if (voiceComponentUnpatch) { try { voiceComponentUnpatch(); } catch (_) {} voiceComponentUnpatch = null; }
     closeSheet();
     transcripts.clear();
-    voiceAttachmentOwners.clear();
     busy.clear();
     partsCache = null;
   }
