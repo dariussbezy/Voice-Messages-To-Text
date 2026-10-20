@@ -26,7 +26,7 @@ const implementation = (() => {
   const common = metro.common || {};
   const stores = common.stores || {};
 
-  const BUILD = "v1.1.21";
+  const BUILD = "v1.1.22";
   const SHEET_KEY = "voice-transcript";
   const FLAG_VOICE = 8192;
   const FLAG_TOGGLE = 0x04000000;
@@ -595,6 +595,8 @@ const implementation = (() => {
     const id = sheetState.id;
     const tr = id ? transcripts.get(id) : null;
     const qtActions = tr ? quickTranslateActions(tr) : [];
+    const directQtAction = qtActions.find((action) => action.key === "qt-translate");
+    const chooseQtAction = qtActions.find((action) => action.key === "qt-translate-to");
     const sub = tr ? ["Voice message", tr.dur ? fmtDur(tr.dur) : null, tr.by].filter(Boolean).join(" \u00B7 ") : "";
     const again = () => {
       const t = transcripts.get(id);
@@ -617,7 +619,7 @@ const implementation = (() => {
           h(RN.Text, { selectable: true, style: { color: C.text, fontSize: 16, lineHeight: 23 } }, tr ? tr.text : "This transcript is no longer available."))),
       tr ? h(RN.View, { style: { marginTop: 14 } },
         h(CustomAction, { title: "Copy text", compact: true, top: 0, onPress: () => copyText(tr.text) }),
-        qtActions.length ? h(CustomAction, { title: qtActions[0].label, compact: true, secondary: true, top: 10, onPress: () => { closeSheet(); qtActions[0].press(); } }) : null,
+        directQtAction ? h(CustomAction, { title: directQtAction.label, compact: true, secondary: true, top: 10, onPress: () => { closeSheet(); directQtAction.press(); } }) : null, chooseQtAction ? h(CustomAction, { title: "Translate to…", compact: true, secondary: true, top: 10, onPress: () => { closeSheet(); chooseQtAction.press(); } }) : null,
         h(CustomAction, { title: "Transcribe again", compact: true, secondary: true, top: 10, onPress: again })) : null);
     return parts.ActionSheet ? h(parts.ActionSheet, null, body) : body;
   }
