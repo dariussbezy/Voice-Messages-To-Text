@@ -28,7 +28,7 @@ const implementation = (() => {
   const common = metro.common || {};
   const stores = common.stores || {};
 
-  const BUILD = "v1.1.17";
+  const BUILD = "v1.1.18";
   const SHEET_KEY = "voice-transcript";
   const VOICE_MESSAGE_COMPONENT_PATH = "modules/voice_messages/native/components/VoiceMessageChat.tsx";
   const FLAG_VOICE = 8192;
@@ -52,6 +52,7 @@ const implementation = (() => {
   const timers = [];
   const transcripts = new Map();
   const voiceAttachmentOwners = new Map();
+  const voiceAttachmentObjectOwners = new WeakMap();
   const busy = new Set();
   let ThemeStore;
   let partsCache = null;
@@ -503,52 +504,49 @@ const implementation = (() => {
     const attachment = voiceAttachment(message);
     if (!attachment || !message || !message.id) return;
     const messageId = String(message.id);
-    for (const key of ["id", "url", "proxy_url", "proxyUrl"]) {
+    voiceAttachmentObjectOwners.set(attachment, messageId);
+    for (const key of ["id", "url", "proxy_url", "proxyUrl", "proxyURL", "src", "uri", "attachment_id", "attachmentId"]) {
       const value = attachment[key];
       if (value != null && String(value)) voiceAttachmentOwners.set(String(value), messageId);
     }
   }
+  function transcriptForIdentifier(value) {
+    if (value == null) return null;
+    const key = String(value);
+    const direct = transcripts.get(key);
+    if (direct) return direct;
+    const ownerId = voiceAttachmentOwners.get(key);
+    return ownerId ? transcripts.get(ownerId) || null : null;
+  }
   function transcriptForVoiceProps(props) {
-    const visited = new Set();
-    const queue = [{ value: props, depth: 0 }];
-    let examined = 0;
-    while (queue.length && examined++ < 80) {
-      const item = queue.shift();
-      const value = item && item.value;
-      if (!value || typeof value !== "object" || visited.has(value) || item.depth > 5) continue;
-      visited.add(value);
-      for (const key of ["messageId", "message_id", "id"]) {
-        const id = value[key];
-        if (id == null) continue;
-        const idText = String(id);
-        const direct = transcripts.get(idText);
-        if (direct) return direct;
-        const ownerId = voiceAttachmentOwners.get(idText);
-        if (ownerId && transcripts.has(ownerId)) return transcripts.get(ownerId);
-      }
-      for (const key of ["url", "proxy_url", "proxyUrl"]) {
-        const url = value[key];
-        if (url == null) continue;
-        const ownerId = voiceAttachmentOwners.get(String(url));
-        if (ownerId && transcripts.has(ownerId)) return transcripts.get(ownerId);
-      }
-      if (item.depth < 5) {
-        for (const key of Object.keys(value)) {
-          const child = value[key];
-          if (child && typeof child === "object") queue.push({ value: child, depth: item.depth + 1 });
+    try {
+      const visited = new Set();
+      const queue = [{ value: props, depth: 0 }];
+      let examined = 0;
+      while (queue.length && examined++ < 80) {
+        const item = queue.shift();
+        const value = item && item.value;
+        if (!value || typeof value !== "object" || visited.has(value) || item.depth > 5) continue;
+        visited.add(value);
+        const objectOwner = voiceAttachmentObjectOwners.get(value);
+        if (objectOwner && transcripts.has(objectOwner)) return transcripts.get(objectOwner);
+        for (const key of ["messageId", "message_id", "messageID", "channelMessageId", "id", "attachmentId", "attachment_id"]) {
+          const match = transcriptForIdentifier(value[key]);
+          if (match) return match;
+        }
+        if (item.depth < 5) {
+          for (const key of Object.keys(value)) {
+            const child = value[key];
+            if (typeof child === "string") {
+              const match = transcriptForIdentifier(child);
+              if (match) return match;
+            }
+            if (child && typeof child === "object") queue.push({ value: child, depth: item.depth + 1 });
+          }
         }
       }
-    }
-    return null;
-  }
-  function VoiceTranscriptWrapper(p) {
-    const h = React.createElement;
-    const Component = p.component;
-    const originalProps = p.originalProps || {};
-    const transcript = p.transcript;
-    return h(RN.View, { style: { alignSelf: "stretch" } },
-      h(Component, originalProps),
-      transcript ? h(RN.Text, { selectable: true, style: { color: ACCENT, fontSize: 16, lineHeight: 22, marginTop: 6, flexShrink: 1 } }, transcript.text) : null);
+      return null;
+    } catch (_) { return null; }
   }
   function transcriptView(player, transcript) {
     return React.createElement(RN.View, { style: { alignSelf: "stretch" } },
@@ -626,18 +624,8 @@ const implementation = (() => {
       voiceComponentUnpatch = patchWrappedComponentType(exports.default);
       return !!voiceComponentUnpatch;
     }
-    try {
-      voiceComponentUnpatch = patcher.instead("default", exports, (args, original) => {
-        const originalProps = args && args[0] || {};
-        const transcript = cfg().inline !== false && cfg().position === "below" ? transcriptForVoiceProps(originalProps) : null;
-        if (!transcript) return React.createElement(original, originalProps);
-        return React.createElement(VoiceTranscriptWrapper, { component: original, originalProps, transcript });
-      });
-      return true;
-    } catch (_) {
-      voiceComponentUnpatch = null;
-      return false;
-    }
+    voiceComponentUnpatch = patchElementFactories(exports.default);
+    return !!voiceComponentUnpatch;
   }
 
   /* ---- long-press menu on a voice message ---- */
