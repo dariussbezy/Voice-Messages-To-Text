@@ -11,6 +11,7 @@ const rainStore = rainRuntime.api.storage.createPluginStore("voicetotext", {
   model: "whisper-large-v3-turbo",
   language: "auto",
   inline: true,
+  position: "above",
   textStyle: "link",
   card: false,
   auto: "off",
@@ -27,7 +28,7 @@ const implementation = (() => {
   const common = metro.common || {};
   const stores = common.stores || {};
 
-  const BUILD = "v1.1.14";
+  const BUILD = "v1.1.15";
   const SHEET_KEY = "voice-transcript";
   const FLAG_VOICE = 8192;
   const FLAG_TOGGLE = 0x04000000;
@@ -425,7 +426,7 @@ const implementation = (() => {
     try { clipboard.setString(text); toast("Copied"); } catch (_) { toast("Could not copy"); }
   }
 
-  /* ---- inline text below the voice message ---- */
+  /* ---- inline text on the voice message ---- */
   function paint(nodes, color) {
     if (!color) return nodes;
     return [{ type: "link", target: "usernameOnClick", context: { username: "", usernameOnClick: { action: "0", userId: "0", linkColor: color, messageChannelId: "0" } }, content: nodes }];
@@ -449,44 +450,56 @@ const implementation = (() => {
     const found = cfg().inline === false ? null : transcripts.get(String(m.id));
     if (rowType !== 1 && !found) return;
     const tr = found;
-    // remove any embed added by older versions
+    const below = cfg().position === "below";
+    // remove any embed added earlier (it is added again below when needed)
     const embeds = Array.isArray(m.embeds) ? m.embeds : [];
     const cleanEmbeds = embeds.filter((e) => !(e && e.__vt));
     if (cleanEmbeds.length !== embeds.length) m.embeds = cleanEmbeds;
-    // older versions put the text in the message content (above the player): restore it
     const ours = !!m.__vtOut && m.content === m.__vtOut;
-    if (ours) { m.content = m.__vtBase; }
-    else if (Array.isArray(m.content)) { const clean = stripOurs(m.content); if (clean.length !== m.content.length) m.content = clean; }
-    delete m.__vtOut;
-    delete m.__vtBase;
-    if (!tr) return;
-    // the text goes in an embed: Discord draws embeds after the attachments, so it shows below the voice message
-    // plain, standard Discord embed shape (strings only, no custom color) so iOS and Android both draw it with the normal theme colors
-    const style = cfg().textStyle || "link";
-    const raw = String(tr.text);
-    const cut = (n) => (raw.length > n ? raw.slice(0, n - 1) + "\u2026" : raw);
-    const base = { id: "vt-" + m.id, type: "rich", __vt: true };
-    let embed;
-    // each style puts the text in a different part of the embed, because the app draws each part with its own text color
-    if (style === "title") embed = Object.assign(base, { rawTitle: cut(256), title: cut(256) });
-    else if (style === "titlelink") embed = Object.assign(base, { rawTitle: cut(256), title: cut(256), url: "https://discord.com" });
-    else if (style === "field") embed = Object.assign(base, { fields: [{ rawName: "Transcript", name: "Transcript", rawValue: cut(1024), value: cut(1024), inline: false }] });
-    else if (style === "footer") embed = Object.assign(base, { footer: { text: cut(2048) } });
-    else if (style === "author") embed = Object.assign(base, { author: { name: cut(256) } });
-    else {
-      let body = raw;
-      if (style === "link") body = "[" + raw.replace(/([\\\[\]])/g, "\\$1") + "](https://discord.com)";
-      else if (style === "code") body = "```\n" + raw.replace(/```/g, "'''") + "\n```";
-      embed = Object.assign(base, { rawDescription: body, description: body });
+    if (!tr || below) {
+      if (ours) m.content = m.__vtBase;
+      else if (Array.isArray(m.content)) { const clean = stripOurs(m.content); if (clean.length !== m.content.length) m.content = clean; }
+      delete m.__vtOut;
+      delete m.__vtBase;
+      if (!tr) return;
+      // BELOW: the text goes in an embed, which Discord draws after the voice player. The app draws embed text in black on some themes, so this is experimental.
+      const style = cfg().textStyle || "link";
+      const raw = String(tr.text);
+      const cut = (n) => (raw.length > n ? raw.slice(0, n - 1) + "\u2026" : raw);
+      const base = { id: "vt-" + m.id, type: "rich", rawDescription: "\u200b", description: "\u200b", __vt: true };
+      let embed;
+      if (style === "title") embed = Object.assign(base, { rawTitle: cut(256), title: cut(256) });
+      else if (style === "titlelink") embed = Object.assign(base, { rawTitle: cut(256), title: cut(256), url: "https://discord.com" });
+      else if (style === "field") embed = Object.assign(base, { fields: [{ rawName: "Transcript", name: "Transcript", rawValue: cut(1024), value: cut(1024), inline: false }] });
+      else if (style === "footer") embed = Object.assign(base, { footer: { text: cut(2048) } });
+      else if (style === "author") embed = Object.assign(base, { author: { name: cut(256) } });
+      else {
+        let body = raw;
+        if (style === "link") body = "[" + raw.replace(/([\\\[\]])/g, "\\$1") + "](https://discord.com)";
+        else if (style === "code") body = "```\n" + raw.replace(/```/g, "'''") + "\n```";
+        embed = Object.assign(base, { rawDescription: body, description: body });
+      }
+      m.embeds = cleanEmbeds.concat([embed]);
+      return;
     }
-    m.embeds = cleanEmbeds.concat([embed]);
+    // ABOVE: the text goes in the message content, coloured with the accent colour
+    const base = ours ? m.__vtBase : Array.isArray(m.content) ? stripOurs(m.content) : (m.content == null || (typeof m.content === "string" && !m.content.trim()) ? [] : null);
+    if (!Array.isArray(base)) return;
+    const pc = RN.processColor;
+    const color = pc ? pc(ACCENT) : null;
+    const text = [{ type: "text", content: tr.text, __vt: true }];
+    const gap = () => ({ type: "text", content: "\n", __vt: true });
+    const out = base.length ? base.concat([gap(), gap()], paint(text, color)) : paint(text, color);
+    m.__vtBase = base;
+    m.__vtOut = out;
+    m.content = out;
   }
   function onRenderError() {
     renderErrors++;
     if (renderErrors >= 3 && renderUnpatch) {
       try { renderUnpatch(); } catch (_) {}
       renderUnpatch = null;
-      toast("Voice Messages to Text: text below voice messages was turned off after repeated errors");
+      toast("Voice Messages to Text: text on voice messages was turned off after repeated errors");
     }
   }
   function patchRender() {
@@ -650,7 +663,7 @@ const implementation = (() => {
     const model = p.models.some((x) => x[0] === s.model) ? s.model : p.models[0][0];
     const guide = h(KitGuide, { key: "guide", title: "Quick guide", steps: [
       ["Choose a service", "Free server (no key) works right away, nothing to paste. Or pick Groq (also free) and paste your own API key: open console.groq.com/keys, sign in, tap Create API Key, copy it here, then tap Test connection."],
-      ["Transcribe a message", "Long-press any voice message and choose Transcribe voice message. The text appears right below the voice message. Long-press it again to copy it."],
+      ["Transcribe a message", "Long-press any voice message and choose Transcribe voice message. The text appears on the voice message, above or below it (see Display). Long-press it again to copy it."],
       ["Language", "Auto-detect works for most voice messages. Pick a language if short messages are misread."],
       ["Automatic mode", "Transcribes new incoming voice messages by itself, in direct messages or in every chat. Each one is a request to your service, so it uses your quota."],
       ["Privacy", "The link to the audio is sent to the service you chose when a message is transcribed. Nothing goes anywhere else."],
@@ -665,9 +678,11 @@ const implementation = (() => {
         p.server ? (DEFAULT_SERVER ? null : h(UrlField, { key: "url" })) : h(KeyField, { key: "key" + s.provider }),
         h(CustomAction, { key: "test", title: "Test connection", secondary: true, compact: true, onPress: testConnection })),
       h(CustomSection, { key: "display", title: "Display" },
-        toggle("inline", "Show text below message", "Show the text right below the voice message.", "text"),
-        h(SelectRow, { key: "textStyle", title: "Text style", subtitle: "Try each one until the text is easy to read.", icon: "text", value: nameOf(TEXT_STYLES, s.textStyle || "link"),
-          onPress: () => pick("Text style", "VTStyle", TEXT_STYLES, s.textStyle || "link", (v) => { setSetting("textStyle", v); Array.from(transcripts.values()).forEach((t) => refreshRow(t.channelId, t.id)); redraw(); }) }),
+        toggle("inline", "Show text on voice messages", "Show the text next to the voice message.", "text"),
+        h(SelectRow, { key: "position", title: "Text position", subtitle: "Below is experimental: some themes draw its text in black.", icon: "text", value: s.position === "below" ? "Below" : "Above",
+          onPress: () => pick("Text position", "VTPosition", [["above", "Above the voice message (readable)"], ["below", "Below the voice message (experimental)"]], s.position === "below" ? "below" : "above", (v) => { setSetting("position", v); Array.from(transcripts.values()).forEach((t) => refreshRow(t.channelId, t.id)); redraw(); }) }),
+        s.position === "below" ? h(SelectRow, { key: "textStyle", title: "Text style (below only)", subtitle: "Try each one until the text is easy to read.", icon: "text", value: nameOf(TEXT_STYLES, s.textStyle || "link"),
+          onPress: () => pick("Text style", "VTStyle", TEXT_STYLES, s.textStyle || "link", (v) => { setSetting("textStyle", v); Array.from(transcripts.values()).forEach((t) => refreshRow(t.channelId, t.id)); redraw(); }) }) : null,
         toggle("card", "Also open a result card", "Open a card with a Copy button when the text is ready.", "guide", true)),
       h(CustomSection, { key: "auto", title: "Automatic" },
         h(SelectRow, { key: "auto", title: "Auto-transcribe", subtitle: "Transcribe new incoming voice messages by themselves.", icon: "bell", value: nameOf(AUTO_MODES, s.auto || "off").replace(" only", ""), last: true,
@@ -690,7 +705,7 @@ const implementation = (() => {
     for (const k of Object.keys(defaults)) if (s[k] === undefined) missing[k] = defaults[k];
     if (Object.keys(missing).length) rainStore.useStore.getState().updateSettings(missing);
     loadSaved();
-    if (!patchRender()) toast("Voice Messages to Text: could not find the message list, text below voice messages is unavailable");
+    if (!patchRender()) toast("Voice Messages to Text: could not find the message list, text on voice messages is unavailable");
     if (!patchActionSheet()) toast("Voice Messages to Text: could not add the menu entry");
     try { FluxDispatcher.subscribe("MESSAGE_CREATE", onCreate); unpatches.push(() => FluxDispatcher.unsubscribe("MESSAGE_CREATE", onCreate)); } catch (_) {}
   }
