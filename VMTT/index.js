@@ -28,8 +28,9 @@ const implementation = (() => {
   const common = metro.common || {};
   const stores = common.stores || {};
 
-  const BUILD = "v1.1.15";
+  const BUILD = "v1.1.16";
   const SHEET_KEY = "voice-transcript";
+  const VOICE_MESSAGE_COMPONENT_PATH = "modules/voice_messages/native/components/VoiceMessageChat.tsx";
   const FLAG_VOICE = 8192;
   const FLAG_TOGGLE = 0x04000000;
   const ACCENT = "#8EA1FF";
@@ -50,6 +51,7 @@ const implementation = (() => {
   const unpatches = [];
   const timers = [];
   const transcripts = new Map();
+  const voiceAttachmentOwners = new Map();
   const busy = new Set();
   let ThemeStore;
   let partsCache = null;
@@ -57,6 +59,7 @@ const implementation = (() => {
   let initialized = false;
   let hydrationUnsubscribe = null;
   let renderUnpatch = null;
+  let voiceComponentUnpatch = null;
   let renderErrors = 0;
   let sheetState = { id: null };
 
@@ -447,6 +450,7 @@ const implementation = (() => {
     const m = row && row.message;
     if (!m) return;
     const rowType = input && input.rowType !== undefined ? input.rowType : row.rowType;
+    rememberVoiceAttachmentOwner(m);
     const found = cfg().inline === false ? null : transcripts.get(String(m.id));
     if (rowType !== 1 && !found) return;
     const tr = found;
@@ -462,24 +466,8 @@ const implementation = (() => {
       delete m.__vtOut;
       delete m.__vtBase;
       if (!tr) return;
-      // BELOW: the text goes in an embed, which Discord draws after the voice player. The app draws embed text in black on some themes, so this is experimental.
-      const style = cfg().textStyle || "link";
-      const raw = String(tr.text);
-      const cut = (n) => (raw.length > n ? raw.slice(0, n - 1) + "\u2026" : raw);
-      const base = { id: "vt-" + m.id, type: "rich", rawDescription: "\u200b", description: "\u200b", __vt: true };
-      let embed;
-      if (style === "title") embed = Object.assign(base, { rawTitle: cut(256), title: cut(256) });
-      else if (style === "titlelink") embed = Object.assign(base, { rawTitle: cut(256), title: cut(256), url: "https://discord.com" });
-      else if (style === "field") embed = Object.assign(base, { fields: [{ rawName: "Transcript", name: "Transcript", rawValue: cut(1024), value: cut(1024), inline: false }] });
-      else if (style === "footer") embed = Object.assign(base, { footer: { text: cut(2048) } });
-      else if (style === "author") embed = Object.assign(base, { author: { name: cut(256) } });
-      else {
-        let body = raw;
-        if (style === "link") body = "[" + raw.replace(/([\\\[\]])/g, "\\$1") + "](https://discord.com)";
-        else if (style === "code") body = "```\n" + raw.replace(/```/g, "'''") + "\n```";
-        embed = Object.assign(base, { rawDescription: body, description: body });
-      }
-      m.embeds = cleanEmbeds.concat([embed]);
+      // BELOW is rendered as a native Text sibling of the player, never as an embed.
+      // The native embed decoder expects a different shape and can render its text black.
       return;
     }
     // ABOVE: the text goes in the message content, coloured with the accent colour
@@ -509,6 +497,76 @@ const implementation = (() => {
       try { decorate(ret, args[0]); } catch (_) { onRenderError(); }
     });
     return true;
+  }
+
+  function rememberVoiceAttachmentOwner(message) {
+    const attachment = voiceAttachment(message);
+    if (!attachment || !message || !message.id) return;
+    const messageId = String(message.id);
+    for (const key of ["id", "url", "proxy_url", "proxyUrl"]) {
+      const value = attachment[key];
+      if (value != null && String(value)) voiceAttachmentOwners.set(String(value), messageId);
+    }
+  }
+  function transcriptForVoiceProps(props) {
+    const visited = new Set();
+    const queue = [{ value: props, depth: 0 }];
+    let examined = 0;
+    while (queue.length && examined++ < 80) {
+      const item = queue.shift();
+      const value = item && item.value;
+      if (!value || typeof value !== "object" || visited.has(value) || item.depth > 5) continue;
+      visited.add(value);
+      for (const key of ["messageId", "message_id", "id"]) {
+        const id = value[key];
+        if (id == null) continue;
+        const idText = String(id);
+        const direct = transcripts.get(idText);
+        if (direct) return direct;
+        const ownerId = voiceAttachmentOwners.get(idText);
+        if (ownerId && transcripts.has(ownerId)) return transcripts.get(ownerId);
+      }
+      for (const key of ["url", "proxy_url", "proxyUrl"]) {
+        const url = value[key];
+        if (url == null) continue;
+        const ownerId = voiceAttachmentOwners.get(String(url));
+        if (ownerId && transcripts.has(ownerId)) return transcripts.get(ownerId);
+      }
+      if (item.depth < 5) {
+        for (const key of Object.keys(value)) {
+          const child = value[key];
+          if (child && typeof child === "object") queue.push({ value: child, depth: item.depth + 1 });
+        }
+      }
+    }
+    return null;
+  }
+  function VoiceTranscriptWrapper(p) {
+    const h = React.createElement;
+    const Component = p.component;
+    const originalProps = p.originalProps || {};
+    const transcript = p.transcript;
+    return h(RN.View, { style: { alignSelf: "stretch" } },
+      h(Component, originalProps),
+      transcript ? h(RN.Text, { selectable: true, style: { color: ACCENT, fontSize: 16, lineHeight: 22, marginTop: 6, flexShrink: 1 } }, transcript.text) : null);
+  }
+  function patchVoiceMessageComponent() {
+    const findByFilePath = metro.findByFilePath;
+    if (typeof findByFilePath !== "function") return false;
+    const exports = safe(() => findByFilePath(VOICE_MESSAGE_COMPONENT_PATH, false), null);
+    if (!exports || typeof exports.default !== "function") return false;
+    try {
+      voiceComponentUnpatch = patcher.instead("default", exports, (args, original) => {
+        const originalProps = args && args[0] || {};
+        const transcript = cfg().inline !== false && cfg().position === "below" ? transcriptForVoiceProps(originalProps) : null;
+        if (!transcript) return React.createElement(original, originalProps);
+        return React.createElement(VoiceTranscriptWrapper, { component: original, originalProps, transcript });
+      });
+      return true;
+    } catch (_) {
+      voiceComponentUnpatch = null;
+      return false;
+    }
   }
 
   /* ---- long-press menu on a voice message ---- */
@@ -706,6 +764,7 @@ const implementation = (() => {
     if (Object.keys(missing).length) rainStore.useStore.getState().updateSettings(missing);
     loadSaved();
     if (!patchRender()) toast("Voice Messages to Text: could not find the message list, text on voice messages is unavailable");
+    if (!patchVoiceMessageComponent() && cfg().position === "below") toast("Voice Messages to Text: below-player text is unavailable in this Discord build; switch Text position to Above");
     if (!patchActionSheet()) toast("Voice Messages to Text: could not add the menu entry");
     try { FluxDispatcher.subscribe("MESSAGE_CREATE", onCreate); unpatches.push(() => FluxDispatcher.unsubscribe("MESSAGE_CREATE", onCreate)); } catch (_) {}
   }
@@ -730,8 +789,10 @@ const implementation = (() => {
     for (const t of timers.splice(0)) clearTimeout(t);
     for (const u of unpatches.splice(0)) { try { u(); } catch (_) {} }
     if (renderUnpatch) { try { renderUnpatch(); } catch (_) {} renderUnpatch = null; }
+    if (voiceComponentUnpatch) { try { voiceComponentUnpatch(); } catch (_) {} voiceComponentUnpatch = null; }
     closeSheet();
     transcripts.clear();
+    voiceAttachmentOwners.clear();
     busy.clear();
     partsCache = null;
   }
