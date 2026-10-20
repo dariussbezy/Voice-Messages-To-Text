@@ -26,7 +26,7 @@ const implementation = (() => {
   const common = metro.common || {};
   const stores = common.stores || {};
 
-  const BUILD = "v1.1.20";
+  const BUILD = "v1.1.21";
   const SHEET_KEY = "voice-transcript";
   const FLAG_VOICE = 8192;
   const FLAG_TOGGLE = 0x04000000;
@@ -476,8 +476,25 @@ const implementation = (() => {
     const pc = RN.processColor;
     const color = pc ? pc(ACCENT) : null;
     const text = [{ type: "text", content: tr.text, __vt: true }];
-    const gap = () => ({ type: "text", content: "\n", __vt: true });
-    const out = base.length ? base.concat([gap(), gap()], paint(text, color)) : paint(text, color);
+    const gap = (marker) => ({ type: "text", content: "\n", [marker || "__vt"]: true });
+    const qt = safe(() => globalThis.__rainQuickTranslateTextBridge, null);
+    const translated = safe(() => qt && qt.isActive() && qt.getMessageTranslation && qt.getMessageTranslation(String(m.id)), null);
+    const hasTranslation = !!(translated && typeof translated.text === "string" && translated.text.trim());
+    const translatedNodes = hasTranslation ? [{ type: "text", content: translated.text, __tr: true }] : [];
+    const translatedColor = hasTranslation && pc ? pc(translated.color || ACCENT) : color;
+    const sourceHint = hasTranslation && translated.sourceLabel
+      ? [{ type: "subtext", content: [{ type: "text", content: translated.sourceLabel, __tr: true }], __tr: true }]
+      : [];
+    let out;
+    if (hasTranslation && translated.immersive === false) {
+      const content = sourceHint.concat(paint(translatedNodes, translatedColor));
+      out = base.length ? base.concat([gap()], content) : content;
+    } else {
+      const content = paint(text, color);
+      if (hasTranslation)
+        content.push(gap("__tr"), gap("__tr"), ...sourceHint, ...paint(translatedNodes, translatedColor));
+      out = base.length ? base.concat([gap(), gap()], content) : content;
+    }
     m.__vtBase = base;
     m.__vtOut = out;
     m.content = out;
