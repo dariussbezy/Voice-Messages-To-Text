@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "name": "Voice Messages To Text",
+  "description": "Voice transcription for Valenced.",
+  "plugins": {
+    "dariuss.voice-messages-to-text": {
+      "name": "Voice Messages To Text",
+      "description": "Transcribe voice messages below the audio, with a free server or Groq.",
+      "author": "dariuss",
+      "icon": "MicrophoneIcon",
+      "channels": {
+        "beta": "1.0.0-beta"
+      },
+      "versions": {
+        "1.0.0-beta": {
+          "url": "https://raw.githubusercontent.com/dariussbezy/Voice-Messages-To-Text/refs/heads/main/VMTT/Voice-Messages-To-Text-Valenced-1.0.0-beta.zip",
+          "sha256": "6c50077258a318a542adc2e251166975ced03db9bcf4312b68275e227aca5ce4",
+          "size": 12648,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": ">=352.6 <352.7"
+            }
+          }
+        }
+      }
+    }
+  }
+}
