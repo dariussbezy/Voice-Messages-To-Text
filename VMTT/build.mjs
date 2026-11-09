@@ -1,4 +1,5 @@
 import { build } from "esbuild";
+import { buildNative } from "./build-native.mjs";
 import { mkdir, readFile, writeFile, readdir } from "node:fs/promises";
 import { zipSync, strToU8 } from "fflate";
 import { fileURLToPath } from "node:url";
@@ -44,7 +45,9 @@ if (process.exitCode) throw new Error("Official Valenced compiler failed");
 const script = await readFile("build/js/index.js", "utf8");
 const manifest = JSON.parse(await readFile("manifest.json", "utf8"));
 const archiveName = `Voice-Messages-To-Text-Valenced-${manifest.version}.zip`;
+const native = await buildNative();
 const archive = zipSync({
+  "plugin.jar": native,
   "manifest.json": strToU8(JSON.stringify(manifest, null, 2)),
   "index.js": strToU8(script),
 });

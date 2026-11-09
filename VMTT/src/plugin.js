@@ -1190,6 +1190,38 @@ const implementation = (() => {
     } catch (_) {}
     return false;
   }
+  async function detectTranscriptLanguage(entry, requestEpoch, automatic) {
+    if (!entry.language || entry.language === "Unknown language") {
+      const api = globalThis.__valencedQuickTranslateTextBridge;
+      if (
+        safe(() => api?.isActive(), false) &&
+        typeof api.detectLanguage === "function"
+      ) {
+        const controller = new AbortController();
+        controllers.add(controller);
+        try {
+          const detected = await api.detectLanguage(entry.text, {
+            automatic,
+            signal: controller.signal,
+          });
+          if (
+            !loadRequested ||
+            epoch !== requestEpoch ||
+            transcripts.get(entry.id) !== entry
+          )
+            return;
+          if (detected?.name) {
+            entry.language = detected.name;
+            persist();
+          }
+        } catch (_) {
+          /* Keep the transcript even when detection is unavailable. */
+        } finally {
+          controllers.delete(controller);
+        }
+      }
+    }
+  }
   async function transcribeMessage(message, opts = undefined) {
     const o = opts || {};
     const id = message && message.id ? String(message.id) : "";
@@ -1199,7 +1231,22 @@ const implementation = (() => {
       return;
     }
     if (transcripts.has(id)) {
-      if (!o.auto) openResult(id);
+      if (!o.auto && !busy.has(id)) {
+        const current = epoch;
+        const entry = transcripts.get(id);
+        busy.add(id);
+        try {
+          await detectTranscriptLanguage(entry, current, false);
+          if (
+            loadRequested &&
+            current === epoch &&
+            transcripts.get(id) === entry
+          )
+            openResult(id);
+        } finally {
+          if (current === epoch) busy.delete(id);
+        }
+      }
       return;
     }
     if (busy.has(id)) {
@@ -1216,7 +1263,7 @@ const implementation = (() => {
         return callService(att, settings);
       }, !!o.auto);
       if (!loadRequested || epoch !== requestEpoch || !result?.text) return;
-      transcripts.set(id, {
+      const entry = {
         id,
         channelId,
         text: result.text,
@@ -1224,15 +1271,23 @@ const implementation = (() => {
         at: Date.now(),
         dur: durOf(att),
         by: (PROVIDERS[settings.provider] || PROVIDERS.server).name,
-      });
+      };
+      transcripts.set(id, entry);
       persist();
       refreshRow(channelId, id);
+      await detectTranscriptLanguage(entry, requestEpoch, !!o.auto);
+      if (
+        !loadRequested ||
+        epoch !== requestEpoch ||
+        transcripts.get(id) !== entry
+      )
+        return;
       if (!o.auto) {
         toast(
           "Transcribed with " +
             (PROVIDERS[settings.provider] || PROVIDERS.server).name +
             " · from " +
-            result.language,
+            entry.language,
         );
         if (cfg().card === true || cfg().inline === false || !renderReady)
           openResult(id);
@@ -1845,7 +1900,7 @@ const implementation = (() => {
         ],
         [
           "Privacy",
-          "The link to the audio is sent to the service you chose when a message is transcribed. Nothing goes anywhere else.",
+          "Audio is sent to your selected transcription service. If it omits the language, an enabled Quick Translate can send transcript text to Google for language detection.",
         ],
       ],
     });

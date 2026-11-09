@@ -14,8 +14,8 @@
       "versions": {
         "1.0.0-beta": {
           "url": "https://raw.githubusercontent.com/dariussbezy/Voice-Messages-To-Text/refs/heads/main/VMTT/Voice-Messages-To-Text-Valenced-1.0.0-beta.zip",
-          "sha256": "c1473f407381f98053ea64c807ce1e2e3b812e3659d313fe3a1ebf84408d36de",
-          "size": 13125,
+          "sha256": "e2ab755937bd1e67bee8160009b515bd61e1efb65a3912a6ebc5e6370f03cdfe",
+          "size": 18895,
           "dependencies": {
             "valenced.api": {
               "version": ">=1 <2"
