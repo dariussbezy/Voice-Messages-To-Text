@@ -2,7 +2,7 @@
 
 Read Discord voice messages as text, with the transcript displayed **below the voice message**.
 
-**Version: 1.0.0-beta** · For Valenced on Discord 352.6.
+**Version: 1.0.0-beta**
 
 ## Installation
 
