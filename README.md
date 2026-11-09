@@ -21,7 +21,9 @@ Find **Voice Messages To Text**, select **beta**, install it and restart Discord
 - Use the built-in free server without an API key, or your own Groq key.
 - Choose automatic language detection or select a language manually.
 - With Groq, choose Whisper large v3 turbo or Whisper large v3.
-- Open a transcript card, copy the text, transcribe again or remove the transcript.
+- Open a compact transcript card, copy the text, transcribe again or remove the transcript.
+- Completion notifications include the detected or manually selected language. A service that returns no language in automatic mode is labeled **Unknown language**.
+- Choose services, languages and automatic modes in matching rounded selection sheets.
 - Translate transcripts with Quick Translate when its current beta is installed and enabled. The translated text stays below the voice message too.
 - Optionally transcribe new incoming voice messages in DMs or all chats; automatic mode is off by default.
 - Optionally remember up to 200 transcripts between restarts, or clear them in settings.

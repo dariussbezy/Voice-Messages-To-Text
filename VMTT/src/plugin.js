@@ -10,7 +10,7 @@ import {
   observeName,
   showToast,
   injectMessageActions,
-  SheetScroll,
+  CompactSheet,
 } from "./valenced";
 import { createPluginStore } from "./settings-store";
 const DEFAULT_SERVER = "https://small-bread-a3d3.dariussbezy.workers.dev";
@@ -1065,6 +1065,27 @@ const implementation = (() => {
       ? String(detail).slice(0, 140)
       : "The service could not read this audio (" + s + ")";
   }
+  function transcriptionResult(data, settings) {
+    const raw = String(
+      data?.language ||
+        data?.detected_language ||
+        data?.detectedLanguage ||
+        (settings.language !== "auto" ? settings.language : "") ||
+        "",
+    ).trim();
+    const known = LANGS.find(
+      ([code, name]) =>
+        code !== "auto" &&
+        (code === raw.toLowerCase() ||
+          name.toLowerCase() === raw.toLowerCase()),
+    );
+    const language = known
+      ? known[1]
+      : raw && raw.toLowerCase() !== "auto"
+        ? raw
+        : "Unknown language";
+    return { text: String(data?.text || "").trim(), language };
+  }
   async function callService(att, s = { ...cfg() }) {
     const p = PROVIDERS[s.provider] || PROVIDERS.server;
     const url = attUrl(att);
@@ -1076,6 +1097,7 @@ const implementation = (() => {
       const payload = {
         url,
         language: s.language && s.language !== "auto" ? s.language : undefined,
+        response_format: "verbose_json",
       };
       const headers = { "Content-Type": "application/json" };
       if (DEFAULT_TOKEN) headers["x-token"] = DEFAULT_TOKEN;
@@ -1088,7 +1110,7 @@ const implementation = (() => {
       const d = await r.json();
       const t = String(d && d.text != null ? d.text : "").trim();
       if (!t) throw new Error("No speech was found in this voice message");
-      return t;
+      return transcriptionResult(d, s);
     }
     const key = String(s.apiKey || "").trim();
     if (!key) throw new Error("Add your API key in the plugin settings first");
@@ -1097,7 +1119,7 @@ const implementation = (() => {
       : p.models[0][0];
     const form = new FormData();
     form.append("model", model);
-    form.append("response_format", "json");
+    form.append("response_format", "verbose_json");
     if (s.language && s.language !== "auto")
       form.append("language", s.language);
     form.append("url", url);
@@ -1110,7 +1132,7 @@ const implementation = (() => {
     const data = await res.json();
     const text = String(data && data.text != null ? data.text : "").trim();
     if (!text) throw new Error("No speech was found in this voice message");
-    return text;
+    return transcriptionResult(data, s);
   }
   async function testConnection() {
     const generation = epoch;
@@ -1189,15 +1211,16 @@ const implementation = (() => {
     const requestEpoch = epoch;
     const settings = { ...cfg() };
     try {
-      const text = await schedule(() => {
+      const result = await schedule(() => {
         if (!loadRequested || epoch !== requestEpoch) return;
         return callService(att, settings);
       }, !!o.auto);
-      if (!loadRequested || epoch !== requestEpoch || !text) return;
+      if (!loadRequested || epoch !== requestEpoch || !result?.text) return;
       transcripts.set(id, {
         id,
         channelId,
-        text,
+        text: result.text,
+        language: result.language,
         at: Date.now(),
         dur: durOf(att),
         by: (PROVIDERS[settings.provider] || PROVIDERS.server).name,
@@ -1207,7 +1230,9 @@ const implementation = (() => {
       if (!o.auto) {
         toast(
           "Transcribed with " +
-            (PROVIDERS[settings.provider] || PROVIDERS.server).name,
+            (PROVIDERS[settings.provider] || PROVIDERS.server).name +
+            " · from " +
+            result.language,
         );
         if (cfg().card === true || cfg().inline === false || !renderReady)
           openResult(id);
@@ -1319,7 +1344,6 @@ const implementation = (() => {
           obscureIsOpaque: false,
           rawDescription: transcript.text,
           description: nodes,
-          fields: [],
           bodyTextColor: color,
         },
       ];
@@ -1445,7 +1469,7 @@ const implementation = (() => {
       (action) => action.key === "qt-translate-to",
     );
     const sub = tr
-      ? ["Voice message", tr.dur ? fmtDur(tr.dur) : null, tr.by]
+      ? [tr.language || "Voice message", tr.dur ? fmtDur(tr.dur) : null, tr.by]
           .filter(Boolean)
           .join(" \u00B7 ")
       : "";
@@ -1463,7 +1487,7 @@ const implementation = (() => {
     };
     const body = h(
       RN.View,
-      { style: { paddingHorizontal: 16, paddingBottom: 16 } },
+      { style: { paddingHorizontal: 16, paddingBottom: 8 } },
       h(
         RN.View,
         {
@@ -1510,7 +1534,8 @@ const implementation = (() => {
               borderRadius: 20,
               borderWidth: 1,
               borderColor: C.card2,
-              padding: 16,
+              paddingHorizontal: 14,
+              paddingVertical: 10,
             },
           },
           h(
@@ -1569,9 +1594,15 @@ const implementation = (() => {
     );
     return parts.ActionSheet
       ? h(
-          parts.ActionSheet,
-          { scrollable: true, startExpanded: true },
-          h(SheetScroll, null, body),
+          CompactSheet,
+          {
+            initialHeight:
+              260 +
+              Math.ceil((tr?.text.length || 0) / 42) * 23 +
+              qtActions.length * 42,
+            maxRatio: 0.58,
+          },
+          body,
         )
       : body;
   }
@@ -1618,7 +1649,8 @@ const implementation = (() => {
       key,
       header: { title },
       options: options.map((o) => ({
-        label: (o[0] === current ? "\u2713 " : "") + o[1],
+        label: o[1],
+        selected: o[0] === current,
         onPress: () => {
           try {
             const l = lazySheets();
@@ -1745,7 +1777,7 @@ const implementation = (() => {
       ),
       h(CustomInput, {
         value,
-        placeholder: DEFAULT_SERVER || "https://your-server.workers.dev",
+        placeholder: "https://your-server.workers.dev",
         autoCapitalize: "none",
         autoCorrect: false,
         spellCheck: false,

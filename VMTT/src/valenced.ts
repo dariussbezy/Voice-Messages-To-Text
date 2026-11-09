@@ -83,56 +83,132 @@ export function observeName(name: string, callback: (module: any) => void) {
     remove();
   };
 }
-export function SheetScroll({ children }: { children?: React.ReactNode }) {
-  // Resolve inside the sheet provider, including when the module loaded lazily.
+export function CompactSheet({
+  children,
+  initialHeight = 300,
+  maxRatio = 0.65,
+}: {
+  children?: React.ReactNode;
+  initialHeight?: number;
+  maxRatio?: number;
+}) {
+  const cap = Math.round(RN.Dimensions.get("window").height * maxRatio);
+  const [height, setHeight] = React.useState(Math.min(initialHeight, cap));
+  const Sheet = Design.ActionSheet as unknown as React.ComponentType<any>;
   const Scroll =
     findByProps("BottomSheetScrollView")?.BottomSheetScrollView ||
     RN.ScrollView;
   return React.createElement(
-    Scroll,
+    Sheet,
     {
-      style: { height: Math.round(RN.Dimensions.get("window").height * 0.7) },
-      contentContainerStyle: { paddingBottom: 24 },
-      nestedScrollEnabled: true,
-      keyboardShouldPersistTaps: "handled",
-      showsVerticalScrollIndicator: true,
+      scrollable: true,
+      startExpanded: false,
+      startHeight: height + 32,
+      contentHeight: height,
+      maxHeight: cap + 32,
     },
-    children,
+    React.createElement(
+      Scroll,
+      {
+        style: { height, flexGrow: 0 },
+        contentContainerStyle: { paddingBottom: 8 },
+        onContentSizeChange: (_width: number, measured: number) => {
+          if (measured > 0) setHeight(Math.min(Math.ceil(measured), cap));
+        },
+        keyboardShouldPersistTaps: "handled",
+        nestedScrollEnabled: true,
+        showsVerticalScrollIndicator: true,
+      },
+      children,
+    ),
   );
 }
 let pickKey: string | undefined;
 function showSimpleActionSheet(config: any) {
   pickKey = config.key;
-  const Sheet = Design.ActionSheet as unknown as React.ComponentType<any>;
-  const Row = Design.ActionSheetRow as unknown as React.ComponentType<any>;
+  const light = findByStoreName("ThemeStore")?.theme === "light";
+  const text = light ? "#060607" : "#FFFFFF";
+  const card = light ? "#F2F3F5" : "#2B2D31";
+  const divider = light ? "rgba(0,0,0,0.08)" : "rgba(255,255,255,0.08)";
   const Component = () =>
     React.createElement(
-      Sheet,
-      { scrollable: true, startExpanded: true },
+      CompactSheet,
+      { initialHeight: 64 + config.options.length * 56 },
       React.createElement(
-        SheetScroll,
-        null,
+        RN.View,
+        { style: { paddingHorizontal: 16, paddingBottom: 8 } },
         React.createElement(
           RN.Text,
           {
             style: {
-              padding: 16,
-              fontSize: 20,
+              textAlign: "center",
+              paddingTop: 4,
+              paddingBottom: 20,
+              fontSize: 18,
               fontWeight: "700",
-              color:
-                findByStoreName("ThemeStore")?.theme === "light"
-                  ? "#060607"
-                  : "#fff",
+              color: text,
             },
           },
           config.header.title,
         ),
-        ...config.options.map((option: any, index: number) =>
-          React.createElement(Row, {
-            key: index,
-            label: option.label,
-            onPress: option.onPress,
-          }),
+        React.createElement(
+          RN.View,
+          {
+            style: {
+              borderRadius: 18,
+              overflow: "hidden",
+              backgroundColor: card,
+            },
+          },
+          ...config.options.map((option: any, index: number) =>
+            React.createElement(
+              RN.Pressable,
+              {
+                key: index,
+                onPress: option.onPress,
+                accessibilityRole: "radio",
+                accessibilityState: { selected: !!option.selected },
+                style: ({ pressed }: { pressed: boolean }) => ({
+                  minHeight: 56,
+                  paddingHorizontal: 16,
+                  paddingVertical: 16,
+                  flexDirection: "row" as const,
+                  alignItems: "center" as const,
+                  backgroundColor: pressed ? divider : "transparent",
+                }),
+              },
+              React.createElement(
+                RN.Text,
+                { style: { flex: 1, fontSize: 16, color: text } },
+                option.label,
+              ),
+              option.selected
+                ? React.createElement(
+                    RN.Text,
+                    {
+                      style: {
+                        color: "#5865F2",
+                        fontSize: 18,
+                        fontWeight: "700",
+                      },
+                    },
+                    "✓",
+                  )
+                : null,
+              index < config.options.length - 1
+                ? React.createElement(RN.View, {
+                    style: {
+                      position: "absolute",
+                      bottom: 0,
+                      left: 16,
+                      right: 16,
+                      height: 1,
+                      backgroundColor: divider,
+                    },
+                  })
+                : null,
+            ),
+          ),
         ),
       ),
     );
