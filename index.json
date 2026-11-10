@@ -1,0 +1,31 @@
+{
+  "format": 1,
+  "name": "Voice Messages To Text",
+  "description": "Transcribe voice messages below the audio, with a free server or Groq.",
+  "plugins": {
+    "dariuss.voice-messages-to-text": {
+      "name": "Voice Messages To Text",
+      "description": "Transcribe voice messages below the audio, with a free server or Groq.",
+      "author": "dariuss",
+      "icon": "MicrophoneIcon",
+      "channels": {
+        "beta": "1.0.0-beta"
+      },
+      "versions": {
+        "1.0.0-beta": {
+          "url": "https://raw.githubusercontent.com/dariussbezy/Voice-Messages-To-Text/refs/heads/main/pool/dariuss.voice-messages-to-text@1.0.0-beta.zip",
+          "sha256": "9cc49a422090d8c7c4a324772ebb4d1187436173e215cb1d83a91bd8136fac91",
+          "size": 18450,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {
+              "version": ">=352.6 <352.7"
+            }
+          }
+        }
+      }
+    }
+  }
+}

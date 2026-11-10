@@ -1,0 +1,33 @@
+const {test}=require('node:test');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+const {createHash}=require('node:crypto');
+const {unzipSync,strFromU8}=require('fflate');
+const root=path.resolve(__dirname,'..');
+const read=p=>JSON.parse(fs.readFileSync(path.join(root,p),'utf8'));
+const config=read('repo.config.json');
+const dist=config.distribution;
+const manifest=read(dist.source+'/manifest.json');
+test('official template structure and per-plugin type project',()=>{
+ for(const file of ['build.gradle.kts','settings.gradle.kts','gradlew','gradle/wrapper/gradle-wrapper.jar','gradle/libs.versions.toml','tsconfig.base.json','package.json','repo.config.json','biome.json'])assert.ok(fs.existsSync(path.join(root,file)),file);
+ assert.equal(read(dist.source+'/tsconfig.json').extends,'../../tsconfig.base.json');
+ assert.ok(['index.ts','index.tsx'].some(name=>fs.existsSync(path.join(root,dist.source,'js',name))));
+ assert.ok(manifest.dependencies['valenced.api']);assert.ok(manifest.dependencies.discord);
+ assert.ok(read('package.json').dependencies['@valenced/plugin-cli'].startsWith('git+https://github.com/Valenced/valenced-plugin-cli.git#'));
+ for(const folder of ['plugins','themes'])if(fs.existsSync(path.join(root,folder)))assert.ok(fs.readdirSync(path.join(root,folder)).every(name=>!name.startsWith('example')&&name!=='always-errors'));
+});
+test('published pool and previous repository URL resolve to the same beta artifact',()=>{
+ const index=read('index.json');const legacy=read(dist.directory+'/index.json');
+ assert.deepEqual(index,legacy);
+ const item=index.plugins[manifest.id];assert.deepEqual(item.channels,{beta:manifest.version});
+ const entry=item.versions[manifest.version];const poolName=manifest.id+'@'+manifest.version+'.zip';
+ const zip=fs.readFileSync(path.join(root,'pool',poolName));
+ assert.equal(entry.sha256,createHash('sha256').update(zip).digest('hex'));
+ assert.equal(entry.size,zip.length);assert.ok(entry.url.endsWith('/pool/'+poolName));
+ assert.deepEqual(zip,fs.readFileSync(path.join(root,dist.directory,dist.archive)));
+ const files=unzipSync(zip);assert.deepEqual(JSON.parse(strFromU8(files['manifest.json'])),manifest);
+ assert.ok(files[manifest.dist.script]);
+ if(manifest.dist.android)assert.ok(files[manifest.dist.android.path]);
+ assert.ok(Object.keys(files).every(name=>name==='manifest.json'||name===manifest.dist.script||name===manifest.dist.android?.path||name.startsWith('assets/')));
+});

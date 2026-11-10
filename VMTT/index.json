@@ -1,7 +1,7 @@
 {
   "format": 1,
   "name": "Voice Messages To Text",
-  "description": "Voice transcription for Valenced.",
+  "description": "Transcribe voice messages below the audio, with a free server or Groq.",
   "plugins": {
     "dariuss.voice-messages-to-text": {
       "name": "Voice Messages To Text",
@@ -13,9 +13,9 @@
       },
       "versions": {
         "1.0.0-beta": {
-          "url": "https://raw.githubusercontent.com/dariussbezy/Voice-Messages-To-Text/refs/heads/main/VMTT/Voice-Messages-To-Text-Valenced-1.0.0-beta.zip",
-          "sha256": "e2ab755937bd1e67bee8160009b515bd61e1efb65a3912a6ebc5e6370f03cdfe",
-          "size": 18895,
+          "url": "https://raw.githubusercontent.com/dariussbezy/Voice-Messages-To-Text/refs/heads/main/pool/dariuss.voice-messages-to-text@1.0.0-beta.zip",
+          "sha256": "9cc49a422090d8c7c4a324772ebb4d1187436173e215cb1d83a91bd8136fac91",
+          "size": 18450,
           "dependencies": {
             "valenced.api": {
               "version": ">=1 <2"

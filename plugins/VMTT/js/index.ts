@@ -1,3 +1,4 @@
+import { createElement } from "react";
 import implementation, { useSettings } from "./plugin.js";
 import { clearCache } from "./valenced";
 export default plugin<{ jsonStorage: Record<string, any> }>({
@@ -18,5 +19,5 @@ export default plugin<{ jsonStorage: Record<string, any> }>({
   stop({ plugin: instance }) {
     instance.requireReload();
   },
-  SettingsComponent: implementation.settings,
+  SettingsComponent: () => createElement(implementation.settings),
 });

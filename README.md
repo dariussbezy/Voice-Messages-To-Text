@@ -48,4 +48,14 @@ If the transcription service does not supply a language and Quick Translate is e
 
 Your Groq key and remembered transcripts are stored in Valenced's local plugin settings. The key is sent only to Groq. Turning off **Remember transcripts** removes saved history while retaining transcripts in memory for the current session. **Clear transcripts** also cancels pending transcriptions.
 
-All plugin sources and the installable package are in [`VMTT`](./VMTT).
+Sources are in [`plugins/VMTT`](./plugins/VMTT). The installable package remains in [`VMTT`](./VMTT).
+
+## Repository structure
+
+Sources use the [official Valenced plugin template](https://github.com/Valenced/valenced-plugin-template/tree/9a4f9187137a75d86fe552d0e594889a6e6fd7e5). The implementation is in [`plugins/VMTT/js`](plugins/VMTT/js), with shared configuration and the official plugin CLI at the repository root. `./gradlew packageAllPlugins` packages the plugin; `npm run publish:local` prepares the pool and both repository indexes. The `VMTT/index.json` installation URL remains supported. Artifacts stay on `main` and the beta channel.
+
+Android sources are in `plugins/VMTT/src/main/java`. Native compilation uses the real Valenced API through Gradle, with compile-only host dependencies. Set `READ_PACKAGES_TOKEN` for the manual packaging workflow, as described by the official template.
+
+Install development dependencies with `bun install --frozen-lockfile` before running the root scripts. The compiler and SDK revisions are pinned in `package.json`.
+
+This template migration preserves the existing native JAR byte for byte. Fresh native compilation requires access to the Valenced SDK package; GitHub Packages returned HTTP 401 with the credentials available during migration.

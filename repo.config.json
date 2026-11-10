@@ -1,0 +1,15 @@
+{
+  "name": "Voice Messages To Text",
+  "description": "Transcribe voice messages below the audio, with a free server or Groq.",
+  "channels": {
+    "dariuss.voice-messages-to-text": {
+      "beta": "1.0.0-beta"
+    }
+  },
+  "distribution": {
+    "source": "plugins/VMTT",
+    "directory": "VMTT",
+    "archive": "Voice-Messages-To-Text-Valenced-1.0.0-beta.zip",
+    "repository": "dariussbezy/Voice-Messages-To-Text"
+  }
+}
