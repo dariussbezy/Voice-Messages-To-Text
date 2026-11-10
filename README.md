@@ -1,6 +1,6 @@
 # Voice Messages To Text
 
-> **Development moved:** all plugins and themes are now maintained in [Valenced Plugins & Themes](https://github.com/dariussbezy/dariussbezy-Valenced-Plugins-Themes). Use the [single repository URL](https://raw.githubusercontent.com/dariussbezy/dariussbezy-Valenced-Plugins-Themes/main/index.json) for installation and updates. This repository remains available for historical links.
+> Valenced test repository. The combined catalog is available from [dariussbezy's Plugins](https://github.com/dariussbezy/dariussbezy-Plugins).
 
 Read Discord voice messages as text, with the transcript displayed **below the voice message**.
 
@@ -11,7 +11,7 @@ Read Discord voice messages as text, with the transcript displayed **below the v
 In Valenced, open **Plugins → Advanced → Repository URL**, paste this URL and add the repository:
 
 ```text
-https://raw.githubusercontent.com/dariussbezy/dariussbezy-Valenced-Plugins-Themes/main/index.json
+https://raw.githubusercontent.com/dariussbezy/Voice-Messages-To-Text/main/index.json
 ```
 
 Find **Voice Messages To Text**, select **beta**, install it and restart Discord.
@@ -38,7 +38,7 @@ Open the plugin settings to choose a service and test the connection. For Groq, 
 
 Long-press a voice message to transcribe it. Once it is ready, long-press again for transcript and translation actions. Enable **Also open a result card** if you prefer a separate reading view.
 
-For transcript translation and fallback language detection, update Quick Translate from [its repository](https://github.com/dariussbezy/Quick-Translate) and restart Discord after updating both plugins.
+For transcript translation and fallback language detection, update Quick Translate from [its repository](https://github.com/dariussbezy/dariussbezy-Plugins) and restart Discord after updating both plugins.
 
 The package includes a small Android spacing module for Discord 352.6. Restart Discord after updating so the native adjustment loads. The shared script continues to work without this Android-specific adjustment.
 
@@ -50,14 +50,4 @@ If the transcription service does not supply a language and Quick Translate is e
 
 Your Groq key and remembered transcripts are stored in Valenced's local plugin settings. The key is sent only to Groq. Turning off **Remember transcripts** removes saved history while retaining transcripts in memory for the current session. **Clear transcripts** also cancels pending transcriptions.
 
-Sources are in [`plugins/VMTT`](./plugins/VMTT). The installable package remains in [`VMTT`](./VMTT).
-
-## Repository structure
-
-Sources use the [official Valenced plugin template](https://github.com/Valenced/valenced-plugin-template/tree/9a4f9187137a75d86fe552d0e594889a6e6fd7e5). The implementation is in [`plugins/VMTT/js`](plugins/VMTT/js), with shared configuration and the official plugin CLI at the repository root. `./gradlew packageAllPlugins` packages the plugin; `npm run publish:local` prepares the pool and both repository indexes. The `VMTT/index.json` installation URL remains supported. Artifacts stay on `main` and the beta channel.
-
-Android sources are in `plugins/VMTT/src/main/java`. Native compilation uses the real Valenced API through Gradle, with compile-only host dependencies. Set `READ_PACKAGES_TOKEN` for the manual packaging workflow, as described by the official template.
-
-Install development dependencies with `bun install --frozen-lockfile` before running the root scripts. The compiler and SDK revisions are pinned in `package.json`.
-
-This template migration preserves the existing native JAR byte for byte. Fresh native compilation requires access to the Valenced SDK package; GitHub Packages returned HTTP 401 with the credentials available during migration.
+Sources are in [`js`](plugins/VMTT/js). The installable package is in the repository [pool](pool).

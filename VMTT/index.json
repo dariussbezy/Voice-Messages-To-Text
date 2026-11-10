@@ -14,8 +14,8 @@
       "versions": {
         "1.0.0-beta": {
           "url": "https://raw.githubusercontent.com/dariussbezy/Voice-Messages-To-Text/refs/heads/main/pool/dariuss.voice-messages-to-text@1.0.0-beta.zip",
-          "sha256": "9cc49a422090d8c7c4a324772ebb4d1187436173e215cb1d83a91bd8136fac91",
-          "size": 18450,
+          "sha256": "34405c0e0e3fc4f0702f814cad9f723b0e388a676002372574c5b7acabe97a1d",
+          "size": 16004,
           "dependencies": {
             "valenced.api": {
               "version": ">=1 <2"
