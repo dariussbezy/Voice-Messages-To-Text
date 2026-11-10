@@ -1,5 +1,7 @@
 # Voice Messages To Text
 
+> **Development moved:** all plugins and themes are now maintained in [Valenced Plugins & Themes](https://github.com/dariussbezy/dariussbezy-Valenced-Plugins-Themes). Use the [single repository URL](https://raw.githubusercontent.com/dariussbezy/dariussbezy-Valenced-Plugins-Themes/main/index.json) for installation and updates. This repository remains available for historical links.
+
 Read Discord voice messages as text, with the transcript displayed **below the voice message**.
 
 **Version: 1.0.0-beta**
@@ -9,7 +11,7 @@ Read Discord voice messages as text, with the transcript displayed **below the v
 In Valenced, open **Plugins → Advanced → Repository URL**, paste this URL and add the repository:
 
 ```text
-https://raw.githubusercontent.com/dariussbezy/Voice-Messages-To-Text/refs/heads/main/VMTT/index.json
+https://raw.githubusercontent.com/dariussbezy/dariussbezy-Valenced-Plugins-Themes/main/index.json
 ```
 
 Find **Voice Messages To Text**, select **beta**, install it and restart Discord.
