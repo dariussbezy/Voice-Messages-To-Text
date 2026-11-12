@@ -9,11 +9,11 @@
       "author": "dariuss",
       "icon": "MicrophoneIcon",
       "channels": {
-        "beta": "1.0.0-beta"
+        "beta": "1.0.1-beta"
       },
       "versions": {
         "1.0.0-beta": {
-          "url": "https://raw.githubusercontent.com/dariussbezy/Voice-Messages-To-Text/refs/heads/main/pool/dariuss.voice-messages-to-text@1.0.0-beta.zip",
+          "url": "https://raw.githubusercontent.com/dariussbezy/Voice-Messages-To-Text/9b816bbc07b12e4e5a4c827350067c89f874954f/pool/dariuss.voice-messages-to-text@1.0.0-beta.zip",
           "sha256": "34405c0e0e3fc4f0702f814cad9f723b0e388a676002372574c5b7acabe97a1d",
           "size": 16004,
           "dependencies": {
@@ -23,6 +23,17 @@
             "discord": {
               "version": ">=352.6 <352.7"
             }
+          }
+        },
+        "1.0.1-beta": {
+          "url": "https://raw.githubusercontent.com/dariussbezy/Voice-Messages-To-Text/9b816bbc07b12e4e5a4c827350067c89f874954f/pool/dariuss.voice-messages-to-text@1.0.1-beta.zip",
+          "sha256": "c04cdf9340912f3cab5fdc2ef3d0704228a474b63bcf2d6ee27ec003a9cc44ae",
+          "size": 16188,
+          "dependencies": {
+            "valenced.api": {
+              "version": ">=1 <2"
+            },
+            "discord": {}
           }
         }
       }
